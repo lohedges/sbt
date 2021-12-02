@@ -20,7 +20,7 @@ Now navigate to the repository directory, source your
 enable script, and run `make`, e.g.:
 
 ```
-cd trackr
+cd sbt
 source /opt/poplar/enable.sh
 make
 ```
