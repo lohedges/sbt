@@ -38,7 +38,7 @@ make CXX=clang++
 Depending on which version of the Poplar SDK you are using, you might
 need to adjust the CXX11 ABI flags. By default, we compile against the
 new version of the ABI. To use the old ABI, e.g. on CentOS 7, simply use
-the `ABIFLAG` argument when invoking make:
+the `ABIFLAG` argument when invoking `make`:
 
 ```
 make ABIFLAG=0
