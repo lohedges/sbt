@@ -80,7 +80,7 @@ throughput will be added in due course.
 
 Some example [event data](data) is provided from the [minbias](https://gitlab.cern.ch/lhcb/Allen/-/tree/master/input/minbias)
 set provided with the [Allen](https://gitlab.cern.ch/lhcb/Allen) repository.
-This files contain hit data for each of the 26 module pairs for each event.
+These files contain hit data for each of the 26 module pairs for each event.
 A module pair record starts with information pertaining to the module pair
 itself, i.e. the number of hits, and the z coordinate of each module in the
 pair. Following this comes the hit records for the module pair. Each record
