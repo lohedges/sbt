@@ -60,12 +60,13 @@ public:
             The number of events processed per second.
 
         \param warmup
-            Whether to perform a "warmup" run. This is useful when benchmarking.
+            Whether to perform a "warmup" run. This can be useful when
+            benchmarking.
 
         \param profile
             Whether to write profiling information to file.
 
-        \return num_tracks, tracks, num_three_hit_tracks, tracklets
+        \return num_tracks, tracks, num_three_hit_tracks, three_hit_tracks
             The reconstructed tracks and three-hit tracks.
      */
     std::tuple<std::vector<unsigned>, std::vector<Track>,
