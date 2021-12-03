@@ -55,10 +55,10 @@ using namespace poplar;
 // Handy aliases for Poplar Input and InOut types. (These are rank-1 tensors.)
 // https://docs.graphcore.ai/projects/assembly-programming/en/latest/vertex_vectors.html
 // Use default alignment for types.
-using InputShortTensor    = Input<Vector<int16_t>>;
-using InputFloatTensor    = Input<Vector<float>>;
-using InOutUnsignedTensor = InOut<Vector<unsigned>>;
-using InOutBoolTensor     = InOut<Vector<bool>>;
+using InputShortTensor    = Input<Vector<int16_t, VectorLayout::ONE_PTR>>;
+using InputFloatTensor    = Input<Vector<float, VectorLayout::ONE_PTR>>;
+using InOutUnsignedTensor = InOut<Vector<unsigned, VectorLayout::ONE_PTR>>;
+using InOutBoolTensor     = InOut<Vector<bool, VectorLayout::ONE_PTR>>;
 
 // Helper function prototypes.
 
@@ -145,19 +145,19 @@ public:
 
         // Cast the phi tensor as an array of int16 types.
         auto phi_array =
-            *static_cast<int16_t(*)[phi.size()]>(static_cast<void*>(&phi[0]));
+            *static_cast<int16_t(*)[constants::max_hits]>(static_cast<void*>(&phi[0]));
 
         // Cast the used_hits tensor as an array of bool types.
         auto used_hit_array =
-            *static_cast<bool(*)[used_hits.size()]>(static_cast<void*>(&used_hits[0]));
+            *static_cast<bool(*)[constants::max_hits]>(static_cast<void*>(&used_hits[0]));
 
         // Cast the track mask tensor as an array of unsigned ints.
         auto track_mask_array =
-            *static_cast<unsigned(*)[track_mask.size()]>(static_cast<void*>(&track_mask[0]));
+            *static_cast<unsigned(*)[constants::max_tracks_to_follow]>(static_cast<void*>(&track_mask[0]));
 
         // Cast the candidates tensor as an array of unsigned ints.
         auto candidate_array =
-            *static_cast<unsigned(*)[candidate_hits.size()]>(static_cast<void*>(&candidate_hits[0]));
+            *static_cast<unsigned(*)[constants::max_seeding_candidates]>(static_cast<void*>(&candidate_hits[0]));
 
         // Initialise variables.
         unsigned tracks_to_follow = 0;
@@ -169,7 +169,7 @@ public:
         *num_three_hit_tracks = 0;
 
         // Set all hits as unused.
-        memset(used_hit_array, false, used_hits.size() * sizeof(bool));
+        memset(used_hit_array, false, constants::max_hits * sizeof(bool));
 
         // Perform intitial track seeding of first module pair triplet.
         // Start at the last three module pairs.
