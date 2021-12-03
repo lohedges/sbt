@@ -16,6 +16,7 @@
 */
 
 #include <iostream>
+#include <vector>
 
 #include <poplar/DeviceManager.hpp>
 #include <poplar/IPUModel.hpp>
@@ -45,8 +46,9 @@ int main()
     double events_per_sec;
     std::cout << "Running benchmarks...\n";
     // Run the program.
-    std::tuple<unsigned*, Track*, unsigned*, Tracklet*> result =
-        search_by_triplet.execute(events_per_sec);
+    std::tuple<std::vector<unsigned>, std::vector<Track>,
+               std::vector<unsigned>, std::vector<Tracklet>>
+        result = search_by_triplet.execute(events_per_sec);
 
     // Output timing statistics.
     std::cout << events_per_sec << " event/s" << std::endl;

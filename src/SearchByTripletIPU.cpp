@@ -41,10 +41,12 @@ SearchByTripletIPU::SearchByTripletIPU(
     this->setupGraphProgram();
 }
 
-std::tuple<unsigned*, Track*, unsigned*, Tracklet*> SearchByTripletIPU::execute(
-    double &events_per_sec,
-    bool warmup,
-    bool profile)
+std::tuple<std::vector<unsigned>, std::vector<Track>,
+           std::vector<unsigned>, std::vector<Tracklet>>
+    SearchByTripletIPU::execute(
+        double &events_per_sec,
+        bool warmup,
+        bool profile)
 {
     // Warn user if they are using an IPUModel device.
     if (this->is_model)
@@ -116,19 +118,27 @@ std::tuple<unsigned*, Track*, unsigned*, Tracklet*> SearchByTripletIPU::execute(
         profile.close();
     }
 
-    unsigned *num_tracks = new unsigned[this->num_tiles];
-    unsigned *num_three_hit_tracks = new unsigned[this->num_tiles];
+    std::vector<unsigned> num_tracks(this->num_tiles);
+    std::vector<unsigned> num_three_hit_tracks(this->num_tiles);
 
-    Track *tracks = new Track[this->num_tiles*constants::max_tracks];
-    Tracklet *three_hit_tracks = new Tracklet[this->num_tiles*constants::max_tracks];
+    std::vector<Track> tracks(this->num_tiles*constants::max_tracks);
+    std::vector<Tracklet> three_hit_tracks(this->num_tiles*constants::max_tracks);
 
     unsigned track_size = this->num_tiles* constants::max_tracks * (constants::max_track_size + 1);
     unsigned three_hit_track_size = this->num_tiles* constants::max_tracks * 3;
 
-    engine.readTensor("num_tracks_read", num_tracks, num_tracks + this->num_tiles);
-    engine.readTensor("num_three_hit_tracks_read", num_three_hit_tracks, num_three_hit_tracks + this->num_tiles);
-    engine.readTensor("tracks_read", tracks, tracks + track_size);
-    engine.readTensor("three_hit_tracks_read", three_hit_tracks, three_hit_tracks + three_hit_track_size);
+    engine.readTensor("num_tracks_read",
+                       num_tracks.data(),
+                       num_tracks.data() + num_tracks.size());
+    engine.readTensor("num_three_hit_tracks_read",
+                       num_three_hit_tracks.data(),
+                       num_three_hit_tracks.data() + num_three_hit_tracks.size());
+    engine.readTensor("tracks_read",
+                       tracks.data(),
+                       tracks.data() + track_size);
+    engine.readTensor("three_hit_tracks_read",
+                       three_hit_tracks.data(),
+                       three_hit_tracks.data() + three_hit_track_size);
 
     return std::make_tuple(num_tracks, tracks,
                            num_three_hit_tracks, three_hit_tracks);

@@ -68,10 +68,12 @@ public:
         \return num_tracks, tracks, num_three_hit_tracks, tracklets
             The reconstructed tracks and three-hit tracks.
      */
-    std::tuple<unsigned*, Track*, unsigned*, Tracklet*> execute(
-        double&,
-        bool warmup=false,
-        bool profile=false);
+    std::tuple<std::vector<unsigned>, std::vector<Track>,
+               std::vector<unsigned>, std::vector<Tracklet>>
+        execute(
+            double&,
+            bool warmup=false,
+            bool profile=false);
 
 private:
     /// The vector of events.
