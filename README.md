@@ -68,20 +68,20 @@ processed per second. This excludes any overhead from compiling the graph
 program, loading it, streaming data to/from the IPU, etc., i.e. it is the
 raw throughput once data is on the IPU.
 
-Running using 1000 tiles on a Graphcore Collosus Mk1 gives a throughput of
-around 34000 events per second.(Memory limitations of the Mk1 hardware means
-that we can't utilise all tiles at present.) In contrast, the CPU
-implementation of the Search by Triplet algorithm within Allen
+Running using 1000 tiles on a Graphcore Collosus MK1 gives a throughput of
+around 34000 events per second, i.e. 34kHz. (Memory limitations of the MK1
+hardware means that we can't utilise all tiles at present.) In contrast,
+the CPU implementation of the Search by Triplet algorithm within Allen
 can process around 3400 on an Intel Xeon Silver 4215R (3.20GHz), i.e.
 the IPU can process about 10 times as many events per second. The beefiest
 GPU currently used for Allen throughput measurements is the NVIDIA GeForce
-RTX 3090, which has an approximate throughput of 230 kHz for the _entire_
+RTX 3090, which has an approximate throughput of 230kHz for the _entire_
 sequence, i.e. 7 tiles faster than the IPU performs for a single algorithm!
 
 An RTX 3090 has 10496 CUDA cores. Due to memory limitations mentioned above,
 the IPU implementation is currently only using 1000 tiles, each with a single
 thread, i.e. the GPU can utilise around 10x more threads. In addition, the GPU
-has 24 GB GDDR6X memory. Each IPU tile has 256 kB of SRAM, so around 300 MB
+has 24GB GDDR6X memory. Each IPU tile has 256kB of SRAM, so around 300 MB
 for an entire MK1 device, i.e .much less than the GPU. (There is, of course,
 the sizeable IPU exchange memory, but you need to configure/compile data
 transfer to / from the IPU tiles where compute is needed.)
