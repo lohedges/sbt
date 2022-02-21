@@ -64,28 +64,28 @@ using InOutBoolTensor     = InOut<Vector<bool, VectorLayout::ONE_PTR>>;
 
 // Find track seeding candidates for a given module pair triplet.
 void track_seeding(
-    ModulePair *module_pairs,
+    const ModulePair *module_pairs,
     const unsigned mp_idx,
-    Hit *hits,
+    const Hit *hits,
     Tracklet *tracklets,
     unsigned &tracks_to_follow,
-    int16_t *phi,
+    const int16_t *phi,
     bool *is_used,
     unsigned *track_mask,
     unsigned *initial_seeding_candidates);
 
 // Forward the candidates to the next module pair triplet.
 void track_forwarding(
-    ModulePair *module_pairs,
+    const ModulePair *module_pairs,
     const unsigned mp_idx,
-    Hit *hits,
+    const Hit *hits,
     Tracklet *tracklets,
     Track *tracks,
     Tracklet *three_hit_tracks,
     unsigned &tracks_to_follow,
     unsigned &num_tracks,
     unsigned &num_three_hit_tracks,
-    int16_t *phi,
+    const int16_t *phi,
     bool *is_used,
     unsigned *track_mask,
     const unsigned diff_ttf,
@@ -93,8 +93,8 @@ void track_forwarding(
 
 // Find first candidate in the forwards direction.
 std::tuple<int16_t, int16_t> find_forward_candidate(
-    ModulePair &module_pair,
-    int16_t *phi,
+    const ModulePair &module_pair,
+    const int16_t *phi,
     const Hit &h0,
     const float tx,
     const float ty,
@@ -125,11 +125,11 @@ public:
 
         // Cast the module_pairs tensor as an array of ModulePair structs.
         auto module_pairs_array =
-            *static_cast<::ModulePair(*)[constants::max_track_size]>(static_cast<void*>(&module_pairs[0]));
+            *static_cast<const ::ModulePair(*)[constants::max_track_size]>(static_cast<const void*>(&module_pairs[0]));
 
         // Cast the hits tensor as an array of Hit structs.
         auto hit_array =
-            *static_cast<::Hit(*)[constants::max_hits]>(static_cast<void*>(&hits[0]));
+            *static_cast<const ::Hit(*)[constants::max_hits]>(static_cast<const void*>(&hits[0]));
 
         // Cast the tracklets tensor as an array of Track structs.
         auto tracklet_array =
@@ -145,7 +145,7 @@ public:
 
         // Cast the phi tensor as an array of int16 types.
         auto phi_array =
-            *static_cast<int16_t(*)[constants::max_hits]>(static_cast<void*>(&phi[0]));
+            *static_cast<const int16_t(*)[constants::max_hits]>(static_cast<const void*>(&phi[0]));
 
         // Cast the used_hits tensor as an array of bool types.
         auto used_hit_array =
@@ -257,12 +257,12 @@ public:
 // Helper function definitions.
 
 void track_seeding(
-    ModulePair *module_pairs,
+    const ModulePair *module_pairs,
     const unsigned mp_idx,
-    Hit *hits,
+    const Hit *hits,
     Tracklet *tracklets,
     unsigned &tracks_to_follow,
-    int16_t *phi,
+    const int16_t *phi,
     bool *is_used,
     unsigned *track_mask,
     unsigned *initial_seeding_candidates)
@@ -416,16 +416,16 @@ void track_seeding(
 }
 
 void track_forwarding(
-    ModulePair *module_pairs,
+    const ModulePair *module_pairs,
     const unsigned mp_idx,
-    Hit *hits,
+    const Hit *hits,
     Tracklet *tracklets,
     Track *tracks,
     Tracklet *three_hit_tracks,
     unsigned &tracks_to_follow,
     unsigned &num_tracks,
     unsigned &num_three_hit_tracks,
-    int16_t *phi,
+    const int16_t *phi,
     bool *is_used,
     unsigned *track_mask,
     const unsigned diff_ttf,
@@ -600,8 +600,8 @@ void track_forwarding(
 }
 
 std::tuple<int16_t, int16_t> find_forward_candidate(
-    ModulePair &module_pair,
-    int16_t *phi,
+    const ModulePair &module_pair,
+    const int16_t *phi,
     const Hit &h0,
     const float tx,
     const float ty,
