@@ -76,30 +76,45 @@ std::tuple<std::vector<unsigned>, std::vector<Track>,
         };
     }
 
-    poplar::Engine engine(this->graph, this->prog, optionFlags);
+    // Create buffers for IPU-to-host streams.
+    std::vector<unsigned> num_tracks(this->num_tiles);
+    std::vector<unsigned> num_three_hit_tracks(this->num_tiles);
+
+    std::vector<Track> tracks(this->num_tiles*constants::max_tracks);
+    std::vector<Tracklet> three_hit_tracks(this->num_tiles*constants::max_tracks);
+
+    const unsigned track_size = this->num_tiles* constants::max_tracks * (constants::max_track_size + 1);
+    const unsigned three_hit_track_size = this->num_tiles* constants::max_tracks * 3;
+
+    // Create the engine and load the IPU device.
+    poplar::Engine engine(this->graph, this->programs, optionFlags);
     engine.load(this->device);
 
-    engine.writeTensor("module_pairs_write",
-      this->module_pair_buffer.data(),
-      this->module_pair_buffer.data() + this->module_pair_buffer.size());
-
-    engine.writeTensor("hits_write",
-      this->hits_buffer.data(),
-      this->hits_buffer.data() + this->hits_buffer.size());
-
-    engine.writeTensor("phi_write",
-      this->phi_buffer.data(),
-      this->phi_buffer.data() + this->phi_buffer.size());
+    // Connect the data streams.
+    engine.connectStream("module_pairs_write", this->module_pair_buffer.data());
+    engine.connectStream("hits_write", this->hits_buffer.data());
+    engine.connectStream("phi_write", this->phi_buffer.data());
+    engine.connectStream("tracks_read", tracks.data());
+    engine.connectStream("three_hit_tracks_read", three_hit_tracks.data());
+    engine.connectStream("num_tracks_read", num_tracks.data());
+    engine.connectStream("num_three_hit_tracks_read", num_tracks.data());
 
     // Perform a warmup run.
     if (warmup)
-        engine.run(0);
+    {
+        engine.run(Program::WRITE);
+        engine.run(Program::RUN);
+        engine.run(Program::READ);
+    }
+
+    // Run the host-to-IPU data stream sequence.
+    engine.run(Program::WRITE);
 
     // Record start time.
     auto start = std::chrono::high_resolution_clock::now();
 
-    // Run the program.
-    engine.run(0);
+    // Run the main algorithm.
+    engine.run(Program::RUN);
 
     // Record end time.
     auto finish = std::chrono::high_resolution_clock::now();
@@ -109,6 +124,9 @@ std::tuple<std::vector<unsigned>, std::vector<Track>,
     auto secs = std::chrono::duration<double>(elapsed).count();
     events_per_sec = this->num_tiles / secs;
 
+    // Run the IPU-to-host data stream sequence.
+    engine.run(Program::READ);
+
     // Write profiling information to file.
     if (profile)
     {
@@ -117,28 +135,6 @@ std::tuple<std::vector<unsigned>, std::vector<Track>,
         engine.printProfileSummary(profile, {{"showExecutionSteps", "true"}});
         profile.close();
     }
-
-    std::vector<unsigned> num_tracks(this->num_tiles);
-    std::vector<unsigned> num_three_hit_tracks(this->num_tiles);
-
-    std::vector<Track> tracks(this->num_tiles*constants::max_tracks);
-    std::vector<Tracklet> three_hit_tracks(this->num_tiles*constants::max_tracks);
-
-    unsigned track_size = this->num_tiles* constants::max_tracks * (constants::max_track_size + 1);
-    unsigned three_hit_track_size = this->num_tiles* constants::max_tracks * 3;
-
-    engine.readTensor("num_tracks_read",
-                       num_tracks.data(),
-                       num_tracks.data() + num_tracks.size());
-    engine.readTensor("num_three_hit_tracks_read",
-                       num_three_hit_tracks.data(),
-                       num_three_hit_tracks.data() + num_three_hit_tracks.size());
-    engine.readTensor("tracks_read",
-                       tracks.data(),
-                       tracks.data() + track_size);
-    engine.readTensor("three_hit_tracks_read",
-                       three_hit_tracks.data(),
-                       three_hit_tracks.data() + three_hit_track_size);
 
     return std::make_tuple(num_tracks, tracks,
                            num_three_hit_tracks, three_hit_tracks);
@@ -324,16 +320,93 @@ void SearchByTripletIPU::setupGraphProgram()
         }
     }
 
-    // Create host read/write handles for buffers.
-    this->graph.createHostWrite("module_pairs_write", module_pairs);
-    this->graph.createHostWrite("hits_write", hits);
-    this->graph.createHostWrite("phi_write", phi);
-    this->graph.createHostWrite("used_hits_write", used_hits);
-    this->graph.createHostRead("tracks_read", tracks);
-    this->graph.createHostRead("three_hit_tracks_read", three_hit_tracks);
-    this->graph.createHostRead("num_tracks_read", num_tracks);
-    this->graph.createHostRead("num_three_hit_tracks_read", num_three_hit_tracks);
+    // FIFO options.
+    auto fifo_opts = poplar::OptionFlags({{"splitLimit", "52428800"}});
 
-    // Add the compute set to the program.
-    this->prog.add(poplar::program::Execute(computeSet));
+    // Create host-to-IPU data streams and associated copy programs.
+
+    auto module_pairs_write = this->graph.addHostToDeviceFIFO(
+            "module_pairs_write",
+            poplar::FLOAT,
+            this->module_pair_buffer.size(),
+            poplar::ReplicatedStreamMode::REPLICATE,
+            fifo_opts);
+    auto copy_module_pairs = poplar::program::Copy(module_pairs_write, module_pairs);
+
+    auto hits_write = this->graph.addHostToDeviceFIFO(
+            "hits_write",
+            poplar::FLOAT,
+            this->hits_buffer.size(),
+            poplar::ReplicatedStreamMode::REPLICATE,
+            fifo_opts);
+    auto copy_hits = poplar::program::Copy(hits_write, hits);
+
+    auto phi_write = this->graph.addHostToDeviceFIFO(
+            "phi_write",
+            poplar::SHORT,
+            this->phi_buffer.size(),
+            poplar::ReplicatedStreamMode::REPLICATE,
+            fifo_opts);
+    auto copy_phi = poplar::program::Copy(phi_write, phi);
+
+    // Create a program sequence to copy data to the IPU.
+    auto copy_to_ipu = poplar::program::Sequence
+    {
+        copy_module_pairs,
+        copy_hits,
+        copy_phi
+    };
+
+    // Add the host-to-IPU data transfer program.
+    this->programs.push_back(copy_to_ipu);
+
+    // Create IPU-to-host data streams and associated copy programs.
+
+    const unsigned track_size = this->num_tiles* constants::max_tracks * (constants::max_track_size + 1);
+    const unsigned three_hit_track_size = this->num_tiles* constants::max_tracks * 3;
+
+    auto tracks_read = this->graph.addDeviceToHostFIFO(
+            "tracks_read",
+            poplar::UNSIGNED_INT,
+            track_size,
+            fifo_opts);
+    auto copy_tracks = poplar::program::Copy(tracks, tracks_read);
+
+    auto three_hit_tracks_read = this->graph.addDeviceToHostFIFO(
+            "three_hit_tracks_read",
+            poplar::UNSIGNED_INT,
+            three_hit_track_size,
+            fifo_opts);
+    auto copy_three_hit_tracks = poplar::program::Copy(three_hit_tracks, three_hit_tracks_read);
+
+    auto num_tracks_read = this->graph.addDeviceToHostFIFO(
+            "num_tracks_read",
+            poplar::UNSIGNED_INT,
+            this->num_tiles,
+            fifo_opts);
+    auto copy_num_tracks =
+        poplar::program::Copy(num_tracks, num_tracks_read);
+
+    auto num_three_hit_tracks_read = this->graph.addDeviceToHostFIFO(
+            "num_three_hit_tracks_read",
+            poplar::UNSIGNED_INT,
+            this->num_tiles,
+            fifo_opts);
+    auto copy_num_three_hit_tracks =
+        poplar::program::Copy(num_three_hit_tracks, num_three_hit_tracks_read);
+
+    // Add the compute set to the programs.
+    this->programs.push_back(poplar::program::Execute(computeSet));
+
+    // Create a program sequence to copy data from the IPU.
+    auto copy_from_ipu = poplar::program::Sequence
+    {
+        copy_tracks,
+        copy_three_hit_tracks,
+        copy_num_tracks,
+        copy_num_three_hit_tracks
+    };
+
+    // Add the IPU-to-host data transfer program.
+    this->programs.push_back(copy_from_ipu);
 }

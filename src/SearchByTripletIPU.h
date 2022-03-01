@@ -27,6 +27,13 @@
 
 #include "Definitions.h"
 
+enum Program
+{
+    WRITE,
+    RUN,
+    READ
+};
+
 struct Tracklet
 {
     unsigned hits[3];
@@ -87,7 +94,7 @@ private:
     poplar::Graph graph;
 
     /// The Poplar program sequence.
-    poplar::program::Sequence prog;
+    std::vector<poplar::program::Program> programs;
 
     /// The number of IPU tiles.
     unsigned num_tiles;
