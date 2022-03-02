@@ -126,7 +126,7 @@ interleave data transfer with compute, e.g. ping-ponging data transfer and
 compute between IPUs, or streaming many more events to the IPU exchange to be
 processed in larger batches.
 
-[In](In) contrast, the CPU implementation of the Search by Triplet algorithm within
+In contrast, the CPU implementation of the Search by Triplet algorithm within
 Allen can run at 3.4kHz on an Intel Xeon Silver 4215R (3.20GHz), i.e. the IPU
 can process about 2 times as many events per second when data transfer is included.
 The beefiest GPU currently used for Allen throughput measurements is the NVIDIA
