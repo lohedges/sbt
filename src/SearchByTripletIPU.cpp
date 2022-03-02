@@ -130,7 +130,7 @@ std::tuple<std::vector<unsigned>, std::vector<Track>,
     total_secs += secs;
 
     // Report timing.
-    std::cout << "\nResults...\n  Copy to IPU took: " << std::fixed << secs/1000 << " ms\n";
+    std::cout << "Results...\n  Copy to IPU took: " << std::fixed << secs/1000 << " ms\n";
 
     // Reset start time.
     start = std::chrono::high_resolution_clock::now();
