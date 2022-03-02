@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2021 Lester Hedges <lester.hedges@gmail.com>
+  Copyright (c) 2021-2022 Lester Hedges <lester.hedges@gmail.com>
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -41,7 +41,7 @@ namespace constants
     static constexpr unsigned max_tracks = 280;
 
     /// Maximum tracks to follow.
-    static constexpr unsigned max_tracks_to_follow = 2048;
+    static constexpr unsigned max_tracks_to_follow = 1024;
 
     /// Maximum number of hits.
     static constexpr unsigned max_hits = max_track_size*max_tracks;

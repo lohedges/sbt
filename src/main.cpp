@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2021 Lester Hedges <lester.hedges@gmail.com>
+  Copyright (c) 2021-2022 Lester Hedges <lester.hedges@gmail.com>
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -84,15 +84,11 @@ int main(int argc, char *argv[])
                                          event_reader.getEvents(),
                                          is_model);
 
-    double events_per_sec;
     std::cout << "Running benchmarks...\n";
     // Run the program.
     std::tuple<std::vector<unsigned>, std::vector<Track>,
                std::vector<unsigned>, std::vector<Tracklet>>
-        result = search_by_triplet.execute(events_per_sec);
-
-    // Output timing statistics.
-    std::cout << events_per_sec << " event/s" << std::endl;
+        result = search_by_triplet.execute();
 
     return 0;
 }

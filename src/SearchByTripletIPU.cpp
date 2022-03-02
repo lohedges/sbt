@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2021 Lester Hedges <lester.hedges@gmail.com>
+  Copyright (c) 2021-2022 Lester Hedges <lester.hedges@gmail.com>
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -16,6 +16,7 @@
 */
 
 #include <chrono>
+#include <iomanip>
 #include <iostream>
 #include <fstream>
 
@@ -32,7 +33,12 @@ SearchByTripletIPU::SearchByTripletIPU(
         is_model(is_model)
 {
     // Store the number of tiles.
-    this->num_tiles = this->device.getTarget().getTilesPerIPU();
+    this->num_tiles = this->device.getTarget().getNumIPUs()
+                    * this->device.getTarget().getTilesPerIPU();
+
+    // Fix the number of threads to 3. We currently can't use all 6 due to
+    // memory restrictions.
+    this->num_threads = 3 * this->num_tiles;
 
     // Add codelets.
     this->graph.addCodelets({"src/SearchByTripletCodelet.cpp"}, "-O3 -I src");
@@ -43,10 +49,7 @@ SearchByTripletIPU::SearchByTripletIPU(
 
 std::tuple<std::vector<unsigned>, std::vector<Track>,
            std::vector<unsigned>, std::vector<Tracklet>>
-    SearchByTripletIPU::execute(
-        double &events_per_sec,
-        bool warmup,
-        bool profile)
+    SearchByTripletIPU::execute(bool warmup, bool profile)
 {
     // Warn user if they are using an IPUModel device.
     if (this->is_model)
@@ -77,14 +80,14 @@ std::tuple<std::vector<unsigned>, std::vector<Track>,
     }
 
     // Create buffers for IPU-to-host streams.
-    std::vector<unsigned> num_tracks(this->num_tiles);
-    std::vector<unsigned> num_three_hit_tracks(this->num_tiles);
+    std::vector<unsigned> num_tracks(this->num_threads);
+    std::vector<unsigned> num_three_hit_tracks(this->num_threads);
 
-    std::vector<Track> tracks(this->num_tiles*constants::max_tracks);
-    std::vector<Tracklet> three_hit_tracks(this->num_tiles*constants::max_tracks);
+    std::vector<Track> tracks(this->num_threads*constants::max_tracks);
+    std::vector<Tracklet> three_hit_tracks(this->num_threads*constants::max_tracks);
 
-    const unsigned track_size = this->num_tiles* constants::max_tracks * (constants::max_track_size + 1);
-    const unsigned three_hit_track_size = this->num_tiles* constants::max_tracks * 3;
+    const unsigned track_size = this->num_threads* constants::max_tracks * (constants::max_track_size + 1);
+    const unsigned three_hit_track_size = this->num_threads* constants::max_tracks * 3;
 
     // Create the engine and load the IPU device.
     poplar::Engine engine(this->graph, this->programs, optionFlags);
@@ -102,19 +105,19 @@ std::tuple<std::vector<unsigned>, std::vector<Track>,
     // Perform a warmup run.
     if (warmup)
     {
-        engine.run(Program::WRITE);
-        engine.run(Program::RUN);
-        engine.run(Program::READ);
+        engine.run(Program::COPY_TO_IPU);
+        engine.run(Program::RUN_ALGORITHM);
+        engine.run(Program::COPY_FROM_IPU);
     }
 
-    // Run the host-to-IPU data stream sequence.
-    engine.run(Program::WRITE);
+    // Initialise the total run time in seconds.
+    double total_secs = 0;
 
     // Record start time.
     auto start = std::chrono::high_resolution_clock::now();
 
-    // Run the main algorithm.
-    engine.run(Program::RUN);
+    // Run the host-to-IPU data stream sequence.
+    engine.run(Program::COPY_TO_IPU);
 
     // Record end time.
     auto finish = std::chrono::high_resolution_clock::now();
@@ -122,10 +125,56 @@ std::tuple<std::vector<unsigned>, std::vector<Track>,
 
     // Calculate run time per event in seconds.
     auto secs = std::chrono::duration<double>(elapsed).count();
-    events_per_sec = this->num_tiles / secs;
+
+    // Update the total run time.
+    total_secs += secs;
+
+    // Report timing.
+    std::cout << "\nResults...\n  Copy to IPU took: " << std::fixed << secs/1000 << " ms\n";
+
+    // Reset start time.
+    start = std::chrono::high_resolution_clock::now();
+
+    // Run the main algorithm.
+    engine.run(Program::RUN_ALGORITHM);
+
+    // Record end time and work out run time.
+    finish = std::chrono::high_resolution_clock::now();
+    elapsed = finish - start;
+
+    // Work out run time in seconds.
+    secs = std::chrono::duration<double>(elapsed).count();
+
+    // Report timing.
+    std::cout << "  Algorithm execution took: " << std::fixed << secs/1000 << " ms\n";
+    auto events_per_sec = this->num_threads / secs;
+    std::cout << "  Raw events per second: "<< std::fixed << events_per_sec << "\n";
+
+    // Update the total run time.
+    total_secs += secs;
+
+    // Reset start time.
+    start = std::chrono::high_resolution_clock::now();
 
     // Run the IPU-to-host data stream sequence.
-    engine.run(Program::READ);
+    engine.run(Program::COPY_FROM_IPU);
+
+    // Record end time and work out run time.
+    finish = std::chrono::high_resolution_clock::now();
+    elapsed = finish - start;
+
+    // Work out run time in seconds.
+    secs = std::chrono::duration<double>(elapsed).count();
+
+    // Update the total run time.
+    total_secs += secs;
+
+    // Report timing.
+    std::cout << "  Copy from IPU took: " << std::fixed << secs/1000 << " ms\n";
+
+    // Overall throughput.
+    events_per_sec = this->num_threads / total_secs;
+    std::cout << "  Events per second: " << std::fixed << events_per_sec << "\n";
 
     // Write profiling information to file.
     if (profile)
@@ -148,11 +197,11 @@ void SearchByTripletIPU::setupGraphProgram()
     // Store the number of module pairs. (Assume this is the same for all events.)
     auto num_module_pairs = this->events[0].getModulePairs().size();
 
-    // Process one event per tile if there are less events than IPUs.
-    if (num_events > this->num_tiles)
+    // Process one event per thread.
+    if (num_events > this->num_threads)
     {
-        throw std::runtime_error("Number of events must not exceed number of tiles: "
-            + std::to_string(num_tiles));
+        throw std::runtime_error("Number of events must not exceed number of threads: "
+            + std::to_string(num_threads));
     }
 
     // Size of buffer entries. (per tile)
@@ -166,67 +215,75 @@ void SearchByTripletIPU::setupGraphProgram()
     auto track_mask_size = constants::max_tracks_to_follow;
 
     // Resize buffers.
-    this->module_pair_buffer.resize(this->num_tiles*module_pair_size);
-    this->hits_buffer.resize(this->num_tiles*hits_size);
-    this->phi_buffer.resize(this->num_tiles*phi_size);
+    this->module_pair_buffer.resize(this->num_threads*module_pair_size);
+    this->hits_buffer.resize(this->num_threads*hits_size);
+    this->phi_buffer.resize(this->num_threads*phi_size);
 
     // Create the graph variables.
 
     poplar::Tensor module_pairs
         = this->graph.addVariable(poplar::FLOAT,
-                                  {this->num_tiles * module_pair_size},
+                                  {this->num_threads * module_pair_size},
                                   "module_pairs");
     poplar::Tensor hits
         = this->graph.addVariable(poplar::FLOAT,
-                                  {this->num_tiles * hits_size},
+                                  {this->num_threads * hits_size},
                                   "hits");
     poplar::Tensor phi
         = this->graph.addVariable(poplar::SHORT,
-                                  {this->num_tiles * phi_size},
+                                  {this->num_threads * phi_size},
                                   "phi");
     poplar::Tensor candidates
         = this->graph.addVariable(poplar::UNSIGNED_INT,
-                                  {this->num_tiles * candidates_size},
+                                  {this->num_threads * candidates_size},
                                   "candidates");
     poplar::Tensor used_hits
         = this->graph.addVariable(poplar::BOOL,
-                                  {this->num_tiles * phi_size},
+                                  {this->num_threads * phi_size},
                                   "used_hits");
     poplar::Tensor tracklets
         = this->graph.addVariable(poplar::UNSIGNED_INT,
-                                  {this->num_tiles * tracklets_size},
+                                  {this->num_threads * tracklets_size},
                                   "tracklets");
     poplar::Tensor tracks
         = this->graph.addVariable(poplar::UNSIGNED_INT,
-                                  {this->num_tiles * tracks_size},
+                                  {this->num_threads * tracks_size},
                                   "tracks");
     poplar::Tensor three_hit_tracks
         = this->graph.addVariable(poplar::UNSIGNED_INT,
-                                  {this->num_tiles * three_hit_tracks_size},
+                                  {this->num_threads * three_hit_tracks_size},
                                   "three_hit_tracks");
     poplar::Tensor num_tracks
         = this->graph.addVariable(poplar::UNSIGNED_INT,
-                                  {this->num_tiles},
+                                  {this->num_threads},
                                   "num_tracks");
     poplar::Tensor num_three_hit_tracks
         = this->graph.addVariable(poplar::UNSIGNED_INT,
-                                  {this->num_tiles},
+                                  {this->num_threads},
                                   "num_three_hit_tracks");
     poplar::Tensor track_mask
         = this->graph.addVariable(poplar::UNSIGNED_INT,
-                                  {this->num_tiles * track_mask_size},
+                                  {this->num_threads * track_mask_size},
                                   "track_mask");
 
     // Create a compute set.
     poplar::ComputeSet computeSet = this->graph.addComputeSet("computeSet");
 
-    // Loop over the tiles, processing one event per tile.
-    for (int i=0; i<this->num_tiles; ++i)
+    // Store the number of context workers (hardware threads) per tile.
+    // We currently only use 3 of the 6 available threads due to memory
+    // restrictions.
+    const auto num_workers = 3;
+
+    // Loop over the tiles, processing one event per thread.
+    for (int i=0; i<this->num_threads; ++i)
     {
-        // Work out the event index, modulo the number of tiles.
+        // Work out the event index, modulo the number of threads.
         const auto event_idx = i%num_events;
 
-        // Populate buffers and slice across tiles.
+        // Work out the tile index.
+        const auto tile = int(i/num_workers);
+
+        // Populate buffers and slice across threads.
         auto offset = i*module_pair_size;
         int idx = 0;
         for (const auto &module_pair : this->events[event_idx].getModulePairs())
@@ -237,7 +294,7 @@ void SearchByTripletIPU::setupGraphProgram()
             module_pair_buffer[offset + 4*idx + 3] = module_pair.z1;
             idx++;
         }
-        this->graph.setTileMapping(module_pairs.slice(i*module_pair_size, (i+1)*module_pair_size), i);
+        this->graph.setTileMapping(module_pairs.slice(i*module_pair_size, (i+1)*module_pair_size), tile);
 
         offset = i*hits_size;
         idx = 0;
@@ -249,7 +306,7 @@ void SearchByTripletIPU::setupGraphProgram()
             hits_buffer[offset + 4*idx + 3] = hit.module_idx;
             idx++;
         }
-        this->graph.setTileMapping(hits.slice(i*hits_size, (i+1)*hits_size), i);
+        this->graph.setTileMapping(hits.slice(i*hits_size, (i+1)*hits_size), tile);
 
         offset = i*phi_size;
         idx = 0;
@@ -258,18 +315,15 @@ void SearchByTripletIPU::setupGraphProgram()
             phi_buffer[offset + idx] = hit.phi;
             idx++;
         }
-        this->graph.setTileMapping(phi.slice(i*phi_size, (i+1)*phi_size), i);
-        this->graph.setTileMapping(candidates.slice(i*candidates_size, (i+1)*candidates_size), i);
-        this->graph.setTileMapping(used_hits.slice(i*phi_size, (i+1)*phi_size), i);
-        this->graph.setTileMapping(tracklets.slice(i*tracklets_size, (i+1)*tracklets_size), i);
-        this->graph.setTileMapping(tracks.slice(i*tracks_size, (i+1)*tracks_size), i);
-        this->graph.setTileMapping(three_hit_tracks.slice(i*three_hit_tracks_size, (i+1)*three_hit_tracks_size), i);
-        this->graph.setTileMapping(num_tracks.slice(i, i+1), i);
-        this->graph.setTileMapping(num_three_hit_tracks.slice(i, i+1), i);
-        this->graph.setTileMapping(track_mask.slice(i*track_mask_size, (i+1)*track_mask_size), i);
-
-        // Create the vertex identification string.
-        std::string vertex_id = std::to_string(i);
+        this->graph.setTileMapping(phi.slice(i*phi_size, (i+1)*phi_size), tile);
+        this->graph.setTileMapping(candidates.slice(i*candidates_size, (i+1)*candidates_size), tile);
+        this->graph.setTileMapping(used_hits.slice(i*phi_size, (i+1)*phi_size), tile);
+        this->graph.setTileMapping(tracklets.slice(i*tracklets_size, (i+1)*tracklets_size), tile);
+        this->graph.setTileMapping(tracks.slice(i*tracks_size, (i+1)*tracks_size), tile);
+        this->graph.setTileMapping(three_hit_tracks.slice(i*three_hit_tracks_size, (i+1)*three_hit_tracks_size), tile);
+        this->graph.setTileMapping(num_tracks.slice(i, i+1), tile);
+        this->graph.setTileMapping(num_three_hit_tracks.slice(i, i+1), tile);
+        this->graph.setTileMapping(track_mask.slice(i*track_mask_size, (i+1)*track_mask_size), tile);
 
         // Add a vertex to the compute set.
         poplar::VertexRef vtx = this->graph.addVertex(computeSet, "SearchByTriplet");
@@ -311,7 +365,7 @@ void SearchByTripletIPU::setupGraphProgram()
             track_mask.slice(i*track_mask_size, (i+1)*track_mask_size));
 
         // Map the vertex to a tile.
-        this->graph.setTileMapping(vtx, i);
+        this->graph.setTileMapping(vtx, tile);
 
         // Add a performance estimate if this is an IPUModel device.
         if (this->is_model)
@@ -320,7 +374,7 @@ void SearchByTripletIPU::setupGraphProgram()
         }
     }
 
-    // FIFO options.
+    // FIFO options. Allowing splitting of streams.
     auto fifo_opts = poplar::OptionFlags({{"splitLimit", "52428800"}});
 
     // Create host-to-IPU data streams and associated copy programs.
@@ -362,8 +416,8 @@ void SearchByTripletIPU::setupGraphProgram()
 
     // Create IPU-to-host data streams and associated copy programs.
 
-    const unsigned track_size = this->num_tiles* constants::max_tracks * (constants::max_track_size + 1);
-    const unsigned three_hit_track_size = this->num_tiles* constants::max_tracks * 3;
+    const unsigned track_size = this->num_threads* constants::max_tracks * (constants::max_track_size + 1);
+    const unsigned three_hit_track_size = this->num_threads* constants::max_tracks * 3;
 
     auto tracks_read = this->graph.addDeviceToHostFIFO(
             "tracks_read",
@@ -382,7 +436,7 @@ void SearchByTripletIPU::setupGraphProgram()
     auto num_tracks_read = this->graph.addDeviceToHostFIFO(
             "num_tracks_read",
             poplar::UNSIGNED_INT,
-            this->num_tiles,
+            this->num_threads,
             fifo_opts);
     auto copy_num_tracks =
         poplar::program::Copy(num_tracks, num_tracks_read);
@@ -390,7 +444,7 @@ void SearchByTripletIPU::setupGraphProgram()
     auto num_three_hit_tracks_read = this->graph.addDeviceToHostFIFO(
             "num_three_hit_tracks_read",
             poplar::UNSIGNED_INT,
-            this->num_tiles,
+            this->num_threads,
             fifo_opts);
     auto copy_num_three_hit_tracks =
         poplar::program::Copy(num_three_hit_tracks, num_three_hit_tracks_read);

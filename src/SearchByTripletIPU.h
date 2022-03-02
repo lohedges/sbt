@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2021 Lester Hedges <lester.hedges@gmail.com>
+  Copyright (c) 2021-2022 Lester Hedges <lester.hedges@gmail.com>
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -29,9 +29,9 @@
 
 enum Program
 {
-    WRITE,
-    RUN,
-    READ
+    COPY_TO_IPU,
+    RUN_ALGORITHM,
+    COPY_FROM_IPU
 };
 
 struct Tracklet
@@ -62,11 +62,8 @@ public:
                         std::vector<Event> events,
                         bool is_model=false);
 
-    //! Execute the Kalman filter.
-    /*! \param events_per_sec
-            The number of events processed per second.
-
-        \param warmup
+    //! Execute the Search by Triplet algorithm and report timing statistics.
+    /*! \param warmup
             Whether to perform a "warmup" run. This can be useful when
             benchmarking.
 
@@ -78,10 +75,7 @@ public:
      */
     std::tuple<std::vector<unsigned>, std::vector<Track>,
                std::vector<unsigned>, std::vector<Tracklet>>
-        execute(
-            double&,
-            bool warmup=false,
-            bool profile=false);
+        execute(bool warmup=false, bool profile=false);
 
 private:
     /// The vector of events.
@@ -96,8 +90,11 @@ private:
     /// The Poplar program sequence.
     std::vector<poplar::program::Program> programs;
 
-    /// The number of IPU tiles.
+    /// The number of IPU tiles to use.
     unsigned num_tiles;
+
+    /// The number of IPU threads to use.
+    unsigned num_threads;
 
     /// Whether the device is an IPUModel.
     bool is_model;
