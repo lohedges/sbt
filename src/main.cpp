@@ -90,7 +90,7 @@ int main(int argc, char *argv[])
     }
     else
     {
-        std::cout << "Running benchmarks on " << num_ipus << IPUs...\n";
+        std::cout << "Running benchmarks on " << num_ipus << "IPUs...\n";
     }
 
     // Run the program.
