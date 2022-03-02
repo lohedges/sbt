@@ -84,7 +84,15 @@ int main(int argc, char *argv[])
                                          event_reader.getEvents(),
                                          is_model);
 
-    std::cout << "Running benchmarks...\n";
+    if (num_ipus == 1)
+    {
+        std::cout << "Running benchmarks on 1 IPU...\n";
+    }
+    else
+    {
+        std::cout << "Running benchmarks on " << num_ipus << IPUs...\n";
+    }
+
     // Run the program.
     std::tuple<std::vector<unsigned>, std::vector<Track>,
                std::vector<unsigned>, std::vector<Tracklet>>
