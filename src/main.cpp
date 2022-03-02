@@ -62,6 +62,7 @@ int main(int argc, char *argv[])
     if (num_ipus > 4)
     {
         std::cerr << "Number of IPUs must be in range 1-4.\n";
+        std::cerr << "Usage: ./search_by_triplet num_ipus\n";
         exit(-1);
     }
 
