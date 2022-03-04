@@ -20,41 +20,88 @@
 #include <iostream>
 #include <fstream>
 
+#include <popops/ElementWise.hpp>
+
 #include "EventReader.h"
 #include "SearchByTripletIPU.h"
+
+// Set the number of workers per tile.
+constexpr unsigned num_workers = 1;
 
 SearchByTripletIPU::SearchByTripletIPU(
         poplar::Device device,
         std::vector<Event> events,
-        bool is_model) :
+        const unsigned num_batches,
+        bool ping_pong) :
         device(std::move(device)),
         events(events),
         graph(this->device),
-        is_model(is_model)
+        num_batches(num_batches),
+        ping_pong(ping_pong)
 {
-    // Store the number of tiles.
-    this->num_tiles = this->device.getTarget().getNumIPUs()
-                    * this->device.getTarget().getTilesPerIPU();
+    // Store the number of tiles (per IPU).
+    this->num_tiles = this->device.getTarget().getTilesPerIPU();
 
-    // Fix the number of threads to 3. We currently can't use all 6 due to
-    // memory restrictions.
-    this->num_threads = 3 * this->num_tiles;
+    // Fix the number of threads to num_workers per tile. We currently can't
+    // use all 6 due to memory restrictions.
+    this->num_threads = num_workers*this->num_tiles;
 
     // Add codelets.
     this->graph.addCodelets({"src/SearchByTripletCodelet.cpp"}, "-O3 -I src");
+
+    this->num_batches = 20;
+    this->ping_pong = false;
 
     // Setup the graph program.
     this->setupGraphProgram();
 }
 
-std::tuple<std::vector<unsigned>, std::vector<Track>,
-           std::vector<unsigned>, std::vector<Tracklet>>
-    SearchByTripletIPU::execute(bool warmup, bool profile)
+void  SearchByTripletIPU::execute(bool warmup, bool profile)
 {
-    // Warn user if they are using an IPUModel device.
-    if (this->is_model)
+    // Store the number of events.
+    const auto num_events = this->events.size();
+
+    // Size of buffer entries. (per tile)
+    const auto module_pair_size = 4*constants::num_module_pairs;
+    const auto hits_size = 4*constants::max_hits;
+    const auto phi_size = constants::max_hits;
+
+    // Loop over threads to fill buffers.
+    for (int i=0; i<this->num_threads; ++i)
     {
-        std::cout << "Running on an IPUModel device. Benchmarking is meaningless!" << std::endl;
+        // Work out the event index, modulo the number of threads.
+        const auto event_idx = i%num_events;
+
+        // Populate buffers.
+        auto offset = i*module_pair_size;
+        int idx = 0;
+        for (const auto &module_pair : this->events[event_idx].getModulePairs())
+        {
+            module_pair_buffer[offset + 4*idx    ] = module_pair.hit_start;
+            module_pair_buffer[offset + 4*idx + 1] = module_pair.num_hits;
+            module_pair_buffer[offset + 4*idx + 2] = module_pair.z0;
+            module_pair_buffer[offset + 4*idx + 3] = module_pair.z1;
+            idx++;
+        }
+
+        offset = i*hits_size;
+        idx = 0;
+        for (const auto &hit : this->events[event_idx].getHits())
+        {
+            hits_buffer[offset + 4*idx    ] = hit.x;
+            hits_buffer[offset + 4*idx + 1] = hit.y;
+            hits_buffer[offset + 4*idx + 2] = hit.z;
+            hits_buffer[offset + 4*idx + 3] = hit.module_idx;
+            idx++;
+        }
+
+        offset = i*phi_size;
+        idx = 0;
+        for (const auto &hit : this->events[event_idx].getHits())
+        {
+            phi_buffer[offset + idx] = hit.phi;
+            idx++;
+        }
     }
 
     // Initialise the Poplar engine and load the IPU device.
@@ -66,6 +113,7 @@ std::tuple<std::vector<unsigned>, std::vector<Track>,
         // https://github.com/UoB-HPC/ipu-hpc-cookbook
         optionFlags = poplar::OptionFlags
         {
+            {"target.extendedMemory",             "true"},
             {"target.saveArchive",                "archive.a"},
             {"debug.instrument",                  "true"},
             {"debug.instrumentCompute",           "true"},
@@ -78,46 +126,59 @@ std::tuple<std::vector<unsigned>, std::vector<Track>,
             {"debug.retainDebugInformation",      "true"}
         };
     }
-
-    // Create buffers for IPU-to-host streams.
-    std::vector<unsigned> num_tracks(this->num_threads);
-    std::vector<unsigned> num_three_hit_tracks(this->num_threads);
-
-    std::vector<Track> tracks(this->num_threads*constants::max_tracks);
-    std::vector<Tracklet> three_hit_tracks(this->num_threads*constants::max_tracks);
-
-    const unsigned track_size = this->num_threads* constants::max_tracks * (constants::max_track_size + 1);
-    const unsigned three_hit_track_size = this->num_threads* constants::max_tracks * 3;
-
-    // Create the engine and load the IPU device.
-    poplar::Engine engine(this->graph, this->programs, optionFlags);
-    engine.load(this->device);
-
-    // Connect the data streams.
-    engine.connectStream("module_pairs_write", this->module_pair_buffer.data());
-    engine.connectStream("hits_write", this->hits_buffer.data());
-    engine.connectStream("phi_write", this->phi_buffer.data());
-    engine.connectStream("tracks_read", tracks.data());
-    engine.connectStream("three_hit_tracks_read", three_hit_tracks.data());
-    engine.connectStream("num_tracks_read", num_tracks.data());
-    engine.connectStream("num_three_hit_tracks_read", num_tracks.data());
-
-    // Perform a warmup run.
-    if (warmup)
+    else
     {
-        engine.run(Program::COPY_TO_IPU);
-        engine.run(Program::RUN_ALGORITHM);
-        engine.run(Program::COPY_FROM_IPU);
+        optionFlags = poplar::OptionFlags
+        {
+            {"target.extendedMemory", "true"},
+        };
     }
 
-    // Initialise the total run time in seconds.
-    double total_secs = 0;
+    // Create buffers for IPU-to-host streams.
+    std::vector<unsigned> num_tracks0(this->num_threads);
+    std::vector<unsigned> num_tracks1(this->num_threads);
+    std::vector<unsigned> num_three_hit_tracks0(this->num_threads);
+    std::vector<unsigned> num_three_hit_tracks1(this->num_threads);
+
+    std::vector<Track> tracks0(this->num_threads*constants::max_tracks);
+    std::vector<Track> tracks1(this->num_threads*constants::max_tracks);
+    std::vector<Tracklet> three_hit_tracks0(this->num_threads*constants::max_tracks);
+    std::vector<Tracklet> three_hit_tracks1(this->num_threads*constants::max_tracks);
+
+    // Create the engine and load the IPU device.
+    poplar::Engine engine(this->graph, this->program, optionFlags);
+    engine.load(this->device);
+
+    // Copy data to the remote buffers.
+
+    for (unsigned i=0; i<this->num_batches; ++i)
+    {
+        // Module pair records.
+        engine.copyToRemoteBuffer(module_pair_buffer.data(), "module_pairs_rb0", i);
+        engine.copyToRemoteBuffer(module_pair_buffer.data(), "module_pairs_rb1", i);
+        engine.copyToRemoteBuffer(module_pair_buffer.data(), "module_pairs_rb2", i);
+        engine.copyToRemoteBuffer(module_pair_buffer.data(), "module_pairs_rb3", i);
+
+        // Raw hit data.
+        engine.copyToRemoteBuffer(hits_buffer.data(), "hits_rb0", i);
+        engine.copyToRemoteBuffer(hits_buffer.data(), "hits_rb1", i);
+        engine.copyToRemoteBuffer(hits_buffer.data(), "hits_rb2", i);
+        engine.copyToRemoteBuffer(hits_buffer.data(), "hits_rb3", i);
+
+        // Raw phi data.
+        engine.copyToRemoteBuffer(phi_buffer.data(), "phi_rb0", i);
+        engine.copyToRemoteBuffer(phi_buffer.data(), "phi_rb1", i);
+        engine.copyToRemoteBuffer(phi_buffer.data(), "phi_rb2", i);
+        engine.copyToRemoteBuffer(phi_buffer.data(), "phi_rb3", i);
+    }
+
+    std::cout << "Running benchmarks...\n";
 
     // Record start time.
     auto start = std::chrono::high_resolution_clock::now();
 
-    // Run the host-to-IPU data stream sequence.
-    engine.run(Program::COPY_TO_IPU);
+    // Run program.
+    engine.run(0);
 
     // Record end time.
     auto finish = std::chrono::high_resolution_clock::now();
@@ -126,55 +187,8 @@ std::tuple<std::vector<unsigned>, std::vector<Track>,
     // Calculate run time per event in seconds.
     auto secs = std::chrono::duration<double>(elapsed).count();
 
-    // Update the total run time.
-    total_secs += secs;
-
-    // Report timing.
-    std::cout << "Results...\n  Copy to IPU took: " << std::fixed << secs/1000 << " ms\n";
-
-    // Reset start time.
-    start = std::chrono::high_resolution_clock::now();
-
-    // Run the main algorithm.
-    engine.run(Program::RUN_ALGORITHM);
-
-    // Record end time and work out run time.
-    finish = std::chrono::high_resolution_clock::now();
-    elapsed = finish - start;
-
-    // Work out run time in seconds.
-    secs = std::chrono::duration<double>(elapsed).count();
-
-    // Report timing.
-    std::cout << "  Algorithm execution took: " << std::fixed << secs/1000 << " ms\n";
-    auto events_per_sec = this->num_threads / secs;
-    std::cout << "  Raw events per second: "<< std::fixed << events_per_sec << "\n";
-
-    // Update the total run time.
-    total_secs += secs;
-
-    // Reset start time.
-    start = std::chrono::high_resolution_clock::now();
-
-    // Run the IPU-to-host data stream sequence.
-    engine.run(Program::COPY_FROM_IPU);
-
-    // Record end time and work out run time.
-    finish = std::chrono::high_resolution_clock::now();
-    elapsed = finish - start;
-
-    // Work out run time in seconds.
-    secs = std::chrono::duration<double>(elapsed).count();
-
-    // Update the total run time.
-    total_secs += secs;
-
-    // Report timing.
-    std::cout << "  Copy from IPU took: " << std::fixed << secs/1000 << " ms\n";
-
-    // Overall throughput.
-    events_per_sec = this->num_threads / total_secs;
-    std::cout << "  Events per second: " << std::fixed << events_per_sec << "\n";
+    auto events_per_sec = (this->num_tiles*this->num_threads*this->num_batches) / secs;
+    std::cout << "Events per second: "<< std::fixed << events_per_sec << "\n";
 
     // Write profiling information to file.
     if (profile)
@@ -185,282 +199,717 @@ std::tuple<std::vector<unsigned>, std::vector<Track>,
         profile.close();
     }
 
-    return std::make_tuple(num_tracks, tracks,
-                           num_three_hit_tracks, three_hit_tracks);
+    std::cout << "Validating output...\n";
+
+    // Copy data back from the remote buffers on IPUs 0 and 1 to validate that
+    // the data is the same.
+
+    // Number of tracks.
+    engine.copyFromRemoteBuffer("num_tracks_rb0", num_tracks0.data(), 0);
+    engine.copyFromRemoteBuffer("num_tracks_rb1", num_tracks1.data(), 1);
+    for (unsigned i=0; i<num_tracks0.size(); ++i)
+    {
+        assert(num_tracks0[i] == num_tracks1[i]);
+    }
+
+    // Number of three-hit tracks.
+    engine.copyFromRemoteBuffer("num_three_hit_tracks_rb0", num_three_hit_tracks0.data(), 0);
+    engine.copyFromRemoteBuffer("num_three_hit_tracks_rb1", num_three_hit_tracks1.data(), 1);
+    for (unsigned i=0; i<num_three_hit_tracks0.size(); ++i)
+    {
+        assert(num_three_hit_tracks0[i] == num_three_hit_tracks1[i]);
+    }
+
+    // Tracks.
+    engine.copyFromRemoteBuffer("tracks_rb0", tracks0.data(), 0);
+    engine.copyFromRemoteBuffer("tracks_rb1", tracks1.data(), 1);
+    for (unsigned i=0; i<tracks0.size(); ++i)
+    {
+        assert(tracks0[i].num_hits == tracks1[i].num_hits);
+        for (unsigned j=0; j<tracks0[i].num_hits; ++j)
+        {
+            assert(tracks0[i].hits[j] == tracks1[i].hits[j]);
+        }
+    }
+
+    // Three-hit tracks.
+    engine.copyFromRemoteBuffer("three_hit_tracks_rb0", three_hit_tracks0.data(), 0);
+    engine.copyFromRemoteBuffer("three_hit_tracks_rb1", three_hit_tracks1.data(), 1);
+    for (unsigned i=0; i<three_hit_tracks0.size(); ++i)
+    {
+        assert(three_hit_tracks0[i].hits[0] == three_hit_tracks1[i].hits[0]);
+        assert(three_hit_tracks0[i].hits[1] == three_hit_tracks1[i].hits[1]);
+        assert(three_hit_tracks0[i].hits[2] == three_hit_tracks1[i].hits[2]);
+    }
 }
 
 void SearchByTripletIPU::setupGraphProgram()
 {
-    // Store the number of events.
-    auto num_events = this->events.size();
+    // We will use remote buffers to hold num_batches copies of the event data.
+    // This will be processed by 2 IPUs at a time in a ping-pong fashion, i.e.
+    // IPUs 0 and 1 will compute while IPUs 2 and 3 transfer data, and vice-versa.
 
     // Store the number of module pairs. (Assume this is the same for all events.)
-    auto num_module_pairs = this->events[0].getModulePairs().size();
-
-    // Process one event per thread.
-    if (num_events > this->num_threads)
-    {
-        throw std::runtime_error("Number of events must not exceed number of threads: "
-            + std::to_string(num_threads));
-    }
+    const auto num_module_pairs = this->events[0].getModulePairs().size();
 
     // Size of buffer entries. (per tile)
-    auto module_pair_size = 4 * constants::num_module_pairs;
-    auto hits_size = 4 * constants::max_hits;
-    auto phi_size =  constants::max_hits;
-    auto candidates_size = constants::max_seeding_candidates;
-    auto tracklets_size = constants::max_tracks_to_follow * 3;
-    auto tracks_size = constants::max_tracks * (constants::max_track_size + 1);
-    auto three_hit_tracks_size = constants::max_tracks * 3;
-    auto track_mask_size = constants::max_tracks_to_follow;
+    const auto module_pair_size = 4*constants::num_module_pairs;
+    const auto hits_size = 4*constants::max_hits;
+    const auto phi_size = constants::max_hits;
+    const auto candidates_size = constants::max_seeding_candidates;
+    const auto tracklets_size = constants::max_tracks_to_follow * 3;
+    const auto tracks_size = constants::max_tracks * (constants::max_track_size + 1);
+    const auto three_hit_tracks_size = constants::max_tracks * 3;
+    const auto track_mask_size = constants::max_tracks_to_follow;
 
     // Resize buffers.
     this->module_pair_buffer.resize(this->num_threads*module_pair_size);
     this->hits_buffer.resize(this->num_threads*hits_size);
     this->phi_buffer.resize(this->num_threads*phi_size);
 
-    // Create the graph variables.
+    auto One = graph.addVariable(poplar::INT, {}, "1");
+    this->graph.setTileMapping(One, 0);
+    this->graph.setInitialValue(One, 1);
 
-    poplar::Tensor module_pairs
-        = this->graph.addVariable(poplar::FLOAT,
-                                  {this->num_threads * module_pair_size},
-                                  "module_pairs");
-    poplar::Tensor hits
-        = this->graph.addVariable(poplar::FLOAT,
-                                  {this->num_threads * hits_size},
-                                  "hits");
-    poplar::Tensor phi
-        = this->graph.addVariable(poplar::SHORT,
-                                  {this->num_threads * phi_size},
-                                  "phi");
-    poplar::Tensor candidates
-        = this->graph.addVariable(poplar::UNSIGNED_INT,
-                                  {this->num_threads * candidates_size},
-                                  "candidates");
-    poplar::Tensor used_hits
-        = this->graph.addVariable(poplar::BOOL,
-                                  {this->num_threads * phi_size},
-                                  "used_hits");
-    poplar::Tensor tracklets
-        = this->graph.addVariable(poplar::UNSIGNED_INT,
-                                  {this->num_threads * tracklets_size},
-                                  "tracklets");
-    poplar::Tensor tracks
-        = this->graph.addVariable(poplar::UNSIGNED_INT,
-                                  {this->num_threads * tracks_size},
-                                  "tracks");
-    poplar::Tensor three_hit_tracks
-        = this->graph.addVariable(poplar::UNSIGNED_INT,
-                                  {this->num_threads * three_hit_tracks_size},
-                                  "three_hit_tracks");
-    poplar::Tensor num_tracks
-        = this->graph.addVariable(poplar::UNSIGNED_INT,
-                                  {this->num_threads},
-                                  "num_tracks");
-    poplar::Tensor num_three_hit_tracks
-        = this->graph.addVariable(poplar::UNSIGNED_INT,
-                                  {this->num_threads},
-                                  "num_three_hit_tracks");
-    poplar::Tensor track_mask
-        = this->graph.addVariable(poplar::UNSIGNED_INT,
-                                  {this->num_threads * track_mask_size},
-                                  "track_mask");
+    // Set up indices for the repeat index of the remote buffers.
+    auto rb_index0 = this->graph.addVariable(poplar::INT, {}, "rb_index0");
+    auto rb_index1 = this->graph.addVariable(poplar::INT, {}, "rb_index1");
+    auto rb_index2 = this->graph.addVariable(poplar::INT, {}, "rb_index2");
+    auto rb_index3 = this->graph.addVariable(poplar::INT, {}, "rb_index3");
+    this->graph.setTileMapping(rb_index0,                 0);
+    this->graph.setTileMapping(rb_index1,   this->num_tiles);
+    this->graph.setTileMapping(rb_index2, 2*this->num_tiles);
+    this->graph.setTileMapping(rb_index3, 3*this->num_tiles);
+    this->graph.setInitialValue(rb_index0, 0);
+    this->graph.setInitialValue(rb_index1, 0);
+    this->graph.setInitialValue(rb_index2, 0);
+    this->graph.setInitialValue(rb_index3, 0);
 
-    // Create a compute set.
-    poplar::ComputeSet computeSet = this->graph.addComputeSet("computeSet");
-
-    // Store the number of context workers (hardware threads) per tile.
-    // We currently only use 3 of the 6 available threads due to memory
-    // restrictions.
-    const auto num_workers = 3;
-
-    // Loop over the tiles, processing one event per thread.
-    for (int i=0; i<this->num_threads; ++i)
+    // Taken from UoB-HPC IPU cookbook:
+    // https://github.com/UoB-HPC/ipu-hpc-cookbook
+    // This is required to ensure that tensors only exist on a single IPU,
+    // which is not the case when using Poplar's mapLinearlyWithOffset.
+    const auto mapLinearlyOnOneIpu = [&](
+        poplar::Tensor &tensor,
+        const int ipuNum,
+        poplar::Device &device,
+        poplar::Graph &graph)
     {
-        // Work out the event index, modulo the number of threads.
-        const auto event_idx = i%num_events;
-
-        // Work out the tile index.
-        const auto tile = int(i/num_workers);
-
-        // Populate buffers and slice across threads.
-        auto offset = i*module_pair_size;
-        int idx = 0;
-        for (const auto &module_pair : this->events[event_idx].getModulePairs())
+        auto totalElements = 1;
+        for (auto dim: tensor.shape())
         {
-            module_pair_buffer[offset + 4*idx    ] = module_pair.hit_start;
-            module_pair_buffer[offset + 4*idx + 1] = module_pair.num_hits;
-            module_pair_buffer[offset + 4*idx + 2] = module_pair.z0;
-            module_pair_buffer[offset + 4*idx + 3] = module_pair.z1;
-            idx++;
+            totalElements *= dim;
         }
-        this->graph.setTileMapping(module_pairs.slice(i*module_pair_size, (i+1)*module_pair_size), tile);
-
-        offset = i*hits_size;
-        idx = 0;
-        for (const auto &hit : this->events[event_idx].getHits())
+        int numTilesPerIpu = device.getTarget().getNumTiles() / device.getTarget().getNumIPUs();
+        auto itemsPerTile = totalElements / numTilesPerIpu;
+        auto numTilesWithExtraItem = totalElements % numTilesPerIpu;
+        auto from = 0;
+        for (auto tileNum = 0; tileNum < numTilesPerIpu; tileNum++)
         {
-            hits_buffer[offset + 4*idx    ] = hit.x;
-            hits_buffer[offset + 4*idx + 1] = hit.y;
-            hits_buffer[offset + 4*idx + 2] = hit.z;
-            hits_buffer[offset + 4*idx + 3] = hit.module_idx;
-            idx++;
+            const auto itemsForThisTile = (tileNum < numTilesWithExtraItem) ? itemsPerTile + 1 : itemsPerTile;
+            const auto to = from + itemsForThisTile;
+            graph.setTileMapping(tensor.slice(from, to), tileNum + (ipuNum * numTilesPerIpu));
+            from = to;
         }
-        this->graph.setTileMapping(hits.slice(i*hits_size, (i+1)*hits_size), tile);
+    };
 
-        offset = i*phi_size;
-        idx = 0;
-        for (const auto &hit : this->events[event_idx].getHits())
+    // Create the graph variables. For simplicity, we'll create duplicates
+    // for each IPU and map them using the appropriate tile offset.
+
+    auto module_pairs0 = this->graph.addVariable(
+        poplar::FLOAT, {this->num_threads*module_pair_size}, "module_pairs0");
+    mapLinearlyOnOneIpu(module_pairs0, 0, this->device, this->graph);
+    auto module_pairs_rb0 = this->graph.addRemoteBuffer(
+        "module_pairs_rb0", poplar::FLOAT, this->num_threads*module_pair_size, this->num_batches);
+    auto module_pairs1 = this->graph.addVariable(
+        poplar::FLOAT, {this->num_threads*module_pair_size}, "module_pairs1");
+    mapLinearlyOnOneIpu(module_pairs1, 1, this->device, this->graph);
+    auto module_pairs_rb1 = this->graph.addRemoteBuffer(
+        "module_pairs_rb1", poplar::FLOAT, this->num_threads*module_pair_size, this->num_batches);
+    auto module_pairs2 = this->graph.addVariable(
+        poplar::FLOAT, {this->num_threads*module_pair_size}, "module_pairs2");
+    mapLinearlyOnOneIpu(module_pairs2, 2, this->device, this->graph);
+    auto module_pairs_rb2 = this->graph.addRemoteBuffer(
+        "module_pairs_rb2", poplar::FLOAT, this->num_threads*module_pair_size, this->num_batches);
+    auto module_pairs3 = this->graph.addVariable(
+        poplar::FLOAT, {this->num_threads*module_pair_size}, "module_pairs3");
+    mapLinearlyOnOneIpu(module_pairs3, 3, this->device, this->graph);
+    auto module_pairs_rb3 = this->graph.addRemoteBuffer(
+        "module_pairs_rb3", poplar::FLOAT, this->num_threads*module_pair_size, this->num_batches);
+
+    auto hits0 = this->graph.addVariable(
+        poplar::FLOAT, {this->num_threads*hits_size}, "hits0");
+    mapLinearlyOnOneIpu(hits0, 0, this->device, this->graph);
+    auto hits_rb0 = this->graph.addRemoteBuffer(
+        "hits_rb0", poplar::FLOAT, this->num_threads*hits_size, this->num_batches);
+    auto hits1 = this->graph.addVariable(
+        poplar::FLOAT, {this->num_threads*hits_size}, "hits1");
+    mapLinearlyOnOneIpu(hits1, 1, this->device, this->graph);
+    auto hits_rb1 = this->graph.addRemoteBuffer(
+        "hits_rb1", poplar::FLOAT, this->num_threads*hits_size, this->num_batches);
+    auto hits2 = this->graph.addVariable(
+        poplar::FLOAT, {this->num_threads*hits_size}, "hits2");
+    mapLinearlyOnOneIpu(hits2, 2, this->device, this->graph);
+    auto hits_rb2 = this->graph.addRemoteBuffer(
+        "hits_rb2", poplar::FLOAT, this->num_threads*hits_size, this->num_batches);
+    auto hits3 = this->graph.addVariable(
+        poplar::FLOAT, {this->num_threads*hits_size}, "hits3");
+    mapLinearlyOnOneIpu(hits3, 3, this->device, this->graph);
+    auto hits_rb3 = this->graph.addRemoteBuffer(
+        "hits_rb3", poplar::FLOAT, this->num_threads*hits_size, this->num_batches);
+
+    auto phi0 = this->graph.addVariable(
+        poplar::SHORT, {this->num_threads*phi_size}, "phi0");
+    mapLinearlyOnOneIpu(phi0, 0, this->device, this->graph);
+    auto phi_rb0 = this->graph.addRemoteBuffer(
+        "phi_rb0", poplar::SHORT, this->num_threads*phi_size, this->num_batches);
+    auto phi1 = this->graph.addVariable(
+        poplar::SHORT, {this->num_threads*phi_size}, "phi1");
+    mapLinearlyOnOneIpu(phi1, 1, this->device, this->graph);
+    auto phi_rb1 = this->graph.addRemoteBuffer(
+        "phi_rb1", poplar::SHORT, this->num_threads*phi_size, this->num_batches);
+    auto phi2 = this->graph.addVariable(
+        poplar::SHORT, {this->num_threads*phi_size}, "phi2");
+    mapLinearlyOnOneIpu(phi2, 2, this->device, this->graph);
+    auto phi_rb2 = this->graph.addRemoteBuffer(
+        "phi_rb2", poplar::SHORT, this->num_threads*phi_size, this->num_batches);
+    auto phi3 = this->graph.addVariable(
+        poplar::SHORT, {this->num_threads*phi_size}, "phi3");
+    mapLinearlyOnOneIpu(phi3, 3, this->device, this->graph);
+    auto phi_rb3 = this->graph.addRemoteBuffer(
+        "phi_rb3", poplar::SHORT, this->num_threads*phi_size, this->num_batches);
+
+    auto candidates0 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads*candidates_size}, "candidates0");
+    mapLinearlyOnOneIpu(candidates0, 0, this->device, this->graph);
+    auto candidates1 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads*candidates_size}, "candidates1");
+    mapLinearlyOnOneIpu(candidates1, 1, this->device, this->graph);
+    auto candidates2 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads*candidates_size}, "candidates2");
+    mapLinearlyOnOneIpu(candidates2, 2, this->device, this->graph);
+    auto candidates3 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads*candidates_size}, "candidates3");
+    mapLinearlyOnOneIpu(candidates3, 3, this->device, this->graph);
+
+    auto used_hits0 = this->graph.addVariable(
+        poplar::BOOL, {this->num_threads*phi_size}, "used_hits0");
+    mapLinearlyOnOneIpu(used_hits0, 0, this->device, this->graph);
+    auto used_hits1 = this->graph.addVariable(
+        poplar::BOOL, {this->num_threads*phi_size}, "used_hits1");
+    mapLinearlyOnOneIpu(used_hits1, 1, this->device, this->graph);
+    auto used_hits2 = this->graph.addVariable(
+        poplar::BOOL, {this->num_threads*phi_size}, "used_hits2");
+    mapLinearlyOnOneIpu(used_hits2, 2, this->device, this->graph);
+    auto used_hits3 = this->graph.addVariable(
+        poplar::BOOL, {this->num_threads*phi_size}, "used_hits3");
+    mapLinearlyOnOneIpu(used_hits3, 3, this->device, this->graph);
+
+    auto tracklets0 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads*tracklets_size}, "tracklets0");
+    mapLinearlyOnOneIpu(tracklets0, 0, this->device, this->graph);
+    auto tracklets1 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads*tracklets_size}, "tracklets1");
+    mapLinearlyOnOneIpu(tracklets1, 1, this->device, this->graph);
+    auto tracklets2 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads*tracklets_size}, "tracklets2");
+    mapLinearlyOnOneIpu(tracklets2, 2, this->device, this->graph);
+    auto tracklets3 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads*tracklets_size}, "tracklets3");
+    mapLinearlyOnOneIpu(tracklets3, 3, this->device, this->graph);
+
+    auto tracks0 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads*tracks_size}, "tracks0");
+    mapLinearlyOnOneIpu(tracks0, 0, this->device, this->graph);
+    auto tracks_rb0 = this->graph.addRemoteBuffer(
+        "tracks_rb0", poplar::UNSIGNED_INT, this->num_threads*tracks_size, this->num_batches);
+    auto tracks1 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads*tracks_size}, "tracks1");
+    mapLinearlyOnOneIpu(tracks1, 1, this->device, this->graph);
+    auto tracks_rb1 = this->graph.addRemoteBuffer(
+        "tracks_rb1", poplar::UNSIGNED_INT, this->num_threads*tracks_size, this->num_batches);
+    auto tracks2 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads*tracks_size}, "tracks2");
+    mapLinearlyOnOneIpu(tracks2, 2, this->device, this->graph);
+    auto tracks_rb2 = this->graph.addRemoteBuffer(
+        "tracks_rb2", poplar::UNSIGNED_INT, this->num_threads*tracks_size, this->num_batches);
+    auto tracks3 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads*tracks_size}, "tracks3");
+    mapLinearlyOnOneIpu(tracks3, 3, this->device, this->graph);
+    auto tracks_rb3 = this->graph.addRemoteBuffer(
+        "tracks_rb3", poplar::UNSIGNED_INT, this->num_threads*tracks_size, this->num_batches);
+
+    auto three_hit_tracks0 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads*three_hit_tracks_size}, "three_hit_tracks0");
+    mapLinearlyOnOneIpu(three_hit_tracks0, 0, this->device, this->graph);
+    auto three_hit_tracks_rb0 = this->graph.addRemoteBuffer(
+        "three_hit_tracks_rb0", poplar::UNSIGNED_INT, this->num_threads*three_hit_tracks_size, this->num_batches);
+    auto three_hit_tracks1 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads*three_hit_tracks_size}, "three_hit_tracks1");
+    mapLinearlyOnOneIpu(three_hit_tracks1, 1, this->device, this->graph);
+    auto three_hit_tracks_rb1 = this->graph.addRemoteBuffer(
+        "three_hit_tracks_rb1", poplar::UNSIGNED_INT, this->num_threads*three_hit_tracks_size, this->num_batches);
+    auto three_hit_tracks2 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads*three_hit_tracks_size}, "three_hit_tracks2");
+    mapLinearlyOnOneIpu(three_hit_tracks2, 2, this->device, this->graph);
+    auto three_hit_tracks_rb2 = this->graph.addRemoteBuffer(
+        "three_hit_tracks_rb2", poplar::UNSIGNED_INT, this->num_threads*three_hit_tracks_size, this->num_batches);
+    auto three_hit_tracks3 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads*three_hit_tracks_size}, "three_hit_tracks3");
+    mapLinearlyOnOneIpu(three_hit_tracks3, 3, this->device, this->graph);
+    auto three_hit_tracks_rb3 = this->graph.addRemoteBuffer(
+        "three_hit_tracks_rb3", poplar::UNSIGNED_INT, this->num_threads*three_hit_tracks_size, this->num_batches);
+
+    auto num_tracks0 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads}, "num_tracks0");
+    mapLinearlyOnOneIpu(num_tracks0, 0, this->device, this->graph);
+    auto num_tracks_rb0 = this->graph.addRemoteBuffer(
+        "num_tracks_rb0", poplar::UNSIGNED_INT, this->num_threads, this->num_batches);
+    auto num_tracks1 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads}, "num_tracks1");
+    mapLinearlyOnOneIpu(num_tracks1, 1, this->device, this->graph);
+    auto num_tracks_rb1 = this->graph.addRemoteBuffer(
+        "num_tracks_rb1", poplar::UNSIGNED_INT, this->num_threads, this->num_batches);
+    auto num_tracks2 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads}, "num_tracks2");
+    mapLinearlyOnOneIpu(num_tracks2, 2, this->device, this->graph);
+    auto num_tracks_rb2 = this->graph.addRemoteBuffer(
+        "num_tracks_rb2", poplar::UNSIGNED_INT, this->num_threads, this->num_batches);
+    auto num_tracks3 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads}, "num_tracks3");
+    mapLinearlyOnOneIpu(num_tracks3, 3, this->device, this->graph);
+    auto num_tracks_rb3 = this->graph.addRemoteBuffer(
+        "num_tracks_rb3", poplar::UNSIGNED_INT, this->num_threads, this->num_batches);
+
+    auto num_three_hit_tracks0 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads}, "num_three_hit_tracks0");
+    mapLinearlyOnOneIpu(num_three_hit_tracks0, 0, this->device, this->graph);
+    auto num_three_hit_tracks_rb0 = this->graph.addRemoteBuffer(
+        "num_three_hit_tracks_rb0", poplar::UNSIGNED_INT, this->num_threads, this->num_batches);
+    auto num_three_hit_tracks1 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads}, "num_three_hit_tracks1");
+    mapLinearlyOnOneIpu(num_three_hit_tracks1, 1, this->device, this->graph);
+    auto num_three_hit_tracks_rb1 = this->graph.addRemoteBuffer(
+        "num_three_hit_tracks_rb1", poplar::UNSIGNED_INT, this->num_threads, this->num_batches);
+    auto num_three_hit_tracks2 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads}, "num_three_hit_tracks2");
+    mapLinearlyOnOneIpu(num_three_hit_tracks2, 2, this->device, this->graph);
+    auto num_three_hit_tracks_rb2 = this->graph.addRemoteBuffer(
+        "num_three_hit_tracks_rb2", poplar::UNSIGNED_INT, this->num_threads, this->num_batches);
+    auto num_three_hit_tracks3 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads}, "num_three_hit_tracks3");
+    mapLinearlyOnOneIpu(num_three_hit_tracks3, 3, this->device, this->graph);
+    auto num_three_hit_tracks_rb3 = this->graph.addRemoteBuffer(
+        "num_three_hit_tracks_rb3", poplar::UNSIGNED_INT, this->num_threads, this->num_batches);
+
+    auto track_mask0 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads*track_mask_size}, "track_mask0");
+    mapLinearlyOnOneIpu(track_mask0, 0, this->device, this->graph);
+    auto track_mask1 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads*track_mask_size}, "track_mask1");
+    mapLinearlyOnOneIpu(track_mask1, 1, this->device, this->graph);
+    auto track_mask2 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads*track_mask_size}, "track_mask2");
+    mapLinearlyOnOneIpu(track_mask2, 2, this->device, this->graph);
+    auto track_mask3 = this->graph.addVariable(
+        poplar::UNSIGNED_INT, {this->num_threads*track_mask_size}, "track_mask3");
+    mapLinearlyOnOneIpu(track_mask3, 3, this->device, this->graph);
+
+    // Lambda to create the algorithm program for each IPU.
+    auto createAlgorithmProgram = [&](
+            poplar::Tensor &module_pairs,
+            poplar::Tensor &hits,
+            poplar::Tensor &phi,
+            poplar::Tensor &candidates,
+            poplar::Tensor &used_hits,
+            poplar::Tensor &tracklets,
+            poplar::Tensor &tracks,
+            poplar::Tensor &three_hit_tracks,
+            poplar::Tensor &num_tracks,
+            poplar::Tensor &num_three_hit_tracks,
+            poplar::Tensor &track_mask,
+            const int ipu_num)
+    {
+        // Create a compute set.
+        auto computeSet = this->graph.addComputeSet("computeSet");
+
+        // Add a vertex for each thread that will be used on the tile
+        // and connect tensor slices to vertex inputs and outputs.
+
+        // Work out the starting tile index.
+        const auto start_tile = ipu_num*this->num_tiles;
+
+        // Loop over all threads on the tile.
+        for (unsigned i=0; i<this->num_threads; ++i)
         {
-            phi_buffer[offset + idx] = hit.phi;
-            idx++;
+            // Work out the tile index.
+            const auto tile = start_tile + int(i/num_workers);
+
+            // Add a vertex to the compute set.
+            auto vtx = this->graph.addVertex(computeSet, "SearchByTriplet");
+
+            // Connect variables to vertex inputs and outputs, sub-slicing
+            // tensors over workers.
+            this->graph.connect(
+                vtx["module_pairs"],
+                module_pairs.slice(i*module_pair_size, (i+1)*module_pair_size));
+            this->graph.connect(
+                vtx["hits"],
+                hits.slice(i*hits_size, (i+1)*hits_size));
+            this->graph.connect(
+                vtx["used_hits"],
+                used_hits.slice(i*phi_size, (i+1)*phi_size));
+            this->graph.connect(
+                vtx["phi"],
+                phi.slice(i*phi_size, (i+1)*phi_size));
+            this->graph.connect(
+                vtx["candidate_hits"],
+                candidates.slice(i*candidates_size, (i+1)*candidates_size));
+            this->graph.connect(
+                vtx["tracklets"],
+                tracklets.slice(i*tracklets_size, (i+1)*tracklets_size));
+            this->graph.connect(
+                vtx["tracks"],
+                tracks.slice(i*tracks_size, (i+1)*tracks_size));
+            this->graph.connect(
+                vtx["three_hit_tracks"],
+                three_hit_tracks.slice(i*three_hit_tracks_size, (i+1)*three_hit_tracks_size));
+            this->graph.connect(
+                vtx["num_tracks"],
+                num_tracks[i]);
+            this->graph.connect(
+                vtx["num_three_hit_tracks"],
+                num_three_hit_tracks[i]);
+            this->graph.connect(
+                vtx["track_mask"],
+                track_mask.slice(i*track_mask_size, (i+1)*track_mask_size));
+
+            // Map the vertex to the tile.
+            this->graph.setTileMapping(vtx, tile);
         }
-        this->graph.setTileMapping(phi.slice(i*phi_size, (i+1)*phi_size), tile);
-        this->graph.setTileMapping(candidates.slice(i*candidates_size, (i+1)*candidates_size), tile);
-        this->graph.setTileMapping(used_hits.slice(i*phi_size, (i+1)*phi_size), tile);
-        this->graph.setTileMapping(tracklets.slice(i*tracklets_size, (i+1)*tracklets_size), tile);
-        this->graph.setTileMapping(tracks.slice(i*tracks_size, (i+1)*tracks_size), tile);
-        this->graph.setTileMapping(three_hit_tracks.slice(i*three_hit_tracks_size, (i+1)*three_hit_tracks_size), tile);
-        this->graph.setTileMapping(num_tracks.slice(i, i+1), tile);
-        this->graph.setTileMapping(num_three_hit_tracks.slice(i, i+1), tile);
-        this->graph.setTileMapping(track_mask.slice(i*track_mask_size, (i+1)*track_mask_size), tile);
 
-        // Add a vertex to the compute set.
-        poplar::VertexRef vtx = this->graph.addVertex(computeSet, "SearchByTriplet");
+        return poplar::program::Execute(computeSet);
+    };
 
-        // Connect variables to vertex inputs and outputs, sub-slicing tensors
-        // over workers.
-        this->graph.connect(
-            vtx["module_pairs"],
-            module_pairs.slice(i*module_pair_size, (i+1)*module_pair_size));
-        this->graph.connect(
-            vtx["hits"],
-            hits.slice(i*hits_size, (i+1)*hits_size));
-        this->graph.connect(
-            vtx["used_hits"],
-            used_hits.slice(i*phi_size, (i+1)*phi_size));
-        this->graph.connect(
-            vtx["phi"],
-            phi.slice(i*phi_size, (i+1)*phi_size));
-        this->graph.connect(
-            vtx["candidate_hits"],
-            candidates.slice(i*candidates_size, (i+1)*candidates_size));
-        this->graph.connect(
-            vtx["tracklets"],
-            tracklets.slice(i*tracklets_size, (i+1)*tracklets_size));
-        this->graph.connect(
-            vtx["tracks"],
-            tracks.slice(i*tracks_size, (i+1)*tracks_size));
-        this->graph.connect(
-            vtx["three_hit_tracks"],
-            three_hit_tracks.slice(i*three_hit_tracks_size, (i+1)*three_hit_tracks_size));
-        this->graph.connect(
-            vtx["num_tracks"],
-            num_tracks[i]);
-        this->graph.connect(
-            vtx["num_three_hit_tracks"],
-            num_three_hit_tracks[i]);
-        this->graph.connect(
-            vtx["track_mask"],
-            track_mask.slice(i*track_mask_size, (i+1)*track_mask_size));
+    // Create the algorithm execution program for each IPU.
 
-        // Map the vertex to a tile.
-        this->graph.setTileMapping(vtx, tile);
+    const auto execute_algorithm_ipu0 = poplar::program::Sequence
+    {
+        createAlgorithmProgram(
+            module_pairs0,
+            hits0,
+            phi0,
+            candidates0,
+            used_hits0,
+            tracklets0,
+            tracks0,
+            three_hit_tracks0,
+            num_tracks0,
+            num_three_hit_tracks0,
+            track_mask0,
+            0
+        )
+    };
+    const auto execute_algorithm_ipu1 = poplar::program::Sequence
+    {
+        createAlgorithmProgram(
+            module_pairs1,
+            hits1,
+            phi1,
+            candidates1,
+            used_hits1,
+            tracklets1,
+            tracks1,
+            three_hit_tracks1,
+            num_tracks1,
+            num_three_hit_tracks1,
+            track_mask1,
+            1
+        )
+    };
+    const auto execute_algorithm_ipu2 = poplar::program::Sequence
+    {
+        createAlgorithmProgram(
+            module_pairs2,
+            hits2,
+            phi2,
+            candidates2,
+            used_hits2,
+            tracklets2,
+            tracks2,
+            three_hit_tracks2,
+            num_tracks2,
+            num_three_hit_tracks2,
+            track_mask2,
+            2
+        )
+    };
+    const auto execute_algorithm_ipu3 = poplar::program::Sequence
+    {
+        createAlgorithmProgram(
+            module_pairs3,
+            hits3,
+            phi3,
+            candidates3,
+            used_hits3,
+            tracklets3,
+            tracks3,
+            three_hit_tracks3,
+            num_tracks3,
+            num_three_hit_tracks3,
+            track_mask3,
+            3
+        )
+    };
 
-        // Add a performance estimate if this is an IPUModel device.
-        if (this->is_model)
+    // Create programs to copy data to/from the IPUs using the remote buffers.
+
+    const auto copy_from_module_pairs_rb0 =
+        poplar::program::Copy(module_pairs_rb0, module_pairs0, rb_index0);
+    const auto copy_from_module_pairs_rb1 =
+        poplar::program::Copy(module_pairs_rb1, module_pairs1, rb_index1);
+    const auto copy_from_module_pairs_rb2 =
+        poplar::program::Copy(module_pairs_rb2, module_pairs2, rb_index2);
+    const auto copy_from_module_pairs_rb3 =
+        poplar::program::Copy(module_pairs_rb3, module_pairs3, rb_index3);
+
+    const auto copy_from_hits_rb0 =
+        poplar::program::Copy(hits_rb0, hits0, rb_index0);
+    const auto copy_from_hits_rb1 =
+        poplar::program::Copy(hits_rb1, hits1, rb_index1);
+    const auto copy_from_hits_rb2 =
+        poplar::program::Copy(hits_rb2, hits2, rb_index2);
+    const auto copy_from_hits_rb3 =
+        poplar::program::Copy(hits_rb3, hits3, rb_index3);
+
+    const auto copy_from_phi_rb0 =
+        poplar::program::Copy(phi_rb0, phi0, rb_index0);
+    const auto copy_from_phi_rb1 =
+        poplar::program::Copy(phi_rb1, phi1, rb_index1);
+    const auto copy_from_phi_rb2 =
+        poplar::program::Copy(phi_rb2, phi2, rb_index2);
+    const auto copy_from_phi_rb3 =
+        poplar::program::Copy(phi_rb3, phi3, rb_index3);
+
+    const auto copy_to_tracks_rb0 =
+        poplar::program::Copy(tracks0, tracks_rb0, rb_index0);
+    const auto copy_to_tracks_rb1 =
+        poplar::program::Copy(tracks1, tracks_rb1, rb_index1);
+    const auto copy_to_tracks_rb2 =
+        poplar::program::Copy(tracks2, tracks_rb2, rb_index2);
+    const auto copy_to_tracks_rb3 =
+        poplar::program::Copy(tracks3, tracks_rb3, rb_index3);
+
+    const auto copy_to_three_hit_tracks_rb0 =
+        poplar::program::Copy(three_hit_tracks0, three_hit_tracks_rb0, rb_index0);
+    const auto copy_to_three_hit_tracks_rb1 =
+        poplar::program::Copy(three_hit_tracks1, three_hit_tracks_rb1, rb_index1);
+    const auto copy_to_three_hit_tracks_rb2 =
+        poplar::program::Copy(three_hit_tracks2, three_hit_tracks_rb2, rb_index2);
+    const auto copy_to_three_hit_tracks_rb3 =
+        poplar::program::Copy(three_hit_tracks3, three_hit_tracks_rb3, rb_index3);
+
+    const auto copy_to_num_tracks_rb0 =
+        poplar::program::Copy(num_tracks0, num_tracks_rb0, rb_index0);
+    const auto copy_to_num_tracks_rb1 =
+        poplar::program::Copy(num_tracks1, num_tracks_rb1, rb_index1);
+    const auto copy_to_num_tracks_rb2 =
+        poplar::program::Copy(num_tracks2, num_tracks_rb2, rb_index2);
+    const auto copy_to_num_tracks_rb3 =
+        poplar::program::Copy(num_tracks3, num_tracks_rb3, rb_index3);
+
+    const auto copy_to_num_three_hit_tracks_rb0 =
+        poplar::program::Copy(num_three_hit_tracks0, num_three_hit_tracks_rb0, rb_index0);
+    const auto copy_to_num_three_hit_tracks_rb1 =
+        poplar::program::Copy(num_three_hit_tracks1, num_three_hit_tracks_rb1, rb_index1);
+    const auto copy_to_num_three_hit_tracks_rb2 =
+        poplar::program::Copy(num_three_hit_tracks2, num_three_hit_tracks_rb2, rb_index2);
+    const auto copy_to_num_three_hit_tracks_rb3 =
+        poplar::program::Copy(num_three_hit_tracks3, num_three_hit_tracks_rb3, rb_index3);
+
+    // Consolidate copy programs for each IPU.
+
+    const auto copy_to_ipu0 = poplar::program::Sequence
+    {
+        copy_from_module_pairs_rb0,
+        copy_from_hits_rb0,
+        copy_from_phi_rb0
+    };
+
+    const auto copy_to_ipu1 = poplar::program::Sequence
+    {
+        copy_from_module_pairs_rb1,
+        copy_from_hits_rb1,
+        copy_from_phi_rb1
+    };
+
+    const auto copy_to_ipu2 = poplar::program::Sequence
+    {
+        copy_from_module_pairs_rb2,
+        copy_from_hits_rb2,
+        copy_from_phi_rb2
+    };
+
+    const auto copy_to_ipu3 = poplar::program::Sequence
+    {
+        copy_from_module_pairs_rb3,
+        copy_from_hits_rb3,
+        copy_from_phi_rb3
+    };
+
+    const auto copy_from_ipu0 = poplar::program::Sequence
+    {
+        copy_to_tracks_rb0,
+        copy_to_three_hit_tracks_rb0,
+        copy_to_num_tracks_rb0,
+        copy_to_num_three_hit_tracks_rb0
+    };
+
+    const auto copy_from_ipu1 = poplar::program::Sequence
+    {
+        copy_to_tracks_rb1,
+        copy_to_three_hit_tracks_rb1,
+        copy_to_num_tracks_rb1,
+        copy_to_num_three_hit_tracks_rb1
+    };
+
+    const auto copy_from_ipu2 = poplar::program::Sequence
+    {
+        copy_to_tracks_rb2,
+        copy_to_three_hit_tracks_rb2,
+        copy_to_num_tracks_rb2,
+        copy_to_num_three_hit_tracks_rb2
+    };
+
+    const auto copy_from_ipu3 = poplar::program::Sequence
+    {
+        copy_to_tracks_rb3,
+        copy_to_three_hit_tracks_rb3,
+        copy_to_num_tracks_rb3,
+        copy_to_num_three_hit_tracks_rb3
+    };
+
+    // Lambda function to increment the remote buffer indices.
+    const auto increment = [&](poplar::Tensor &t)
+    {
+        poplar::program::Sequence s;
+        popops::addInPlace(graph, t, One, s, "t++");
+        return s;
+    };
+
+    if (this->ping_pong)
+    {
+        // Run in ping-pong fashion, i.e. alternating compute and data transfer
+        // between pairs of IPU devices. This means that IPUs 0 and 1 compute
+        // while IPUs 2 and 3 load data from the exchange. Next, IPUs 2 and 3
+        // compute while IPUs 0 and 1 copy results back to the exchange.
+        this->program = poplar::program::Sequence
         {
-            this->graph.setPerfEstimate(vtx, 100);
-        }
+            poplar::program::Sequence
+            {
+                copy_to_ipu0,
+                copy_to_ipu1
+            },
+            poplar::program::Sequence
+            {
+                execute_algorithm_ipu0,
+                execute_algorithm_ipu1,
+                copy_to_ipu2,
+                copy_to_ipu3
+            },
+            poplar::program::Sequence
+            {
+                copy_from_ipu0,
+                copy_from_ipu1,
+                execute_algorithm_ipu2,
+                execute_algorithm_ipu3
+            },
+            poplar::program::Repeat(
+                this->num_batches-1,
+                poplar::program::Sequence
+                {
+                    poplar::program::Sequence
+                    {
+                        increment(rb_index0),
+                        increment(rb_index1),
+                    },
+                    poplar::program::Sequence
+                    {
+                        copy_to_ipu0,
+                        copy_to_ipu1,
+                        copy_from_ipu2,
+                        copy_from_ipu3
+                    },
+                    poplar::program::Sequence
+                    {
+                        increment(rb_index2),
+                        increment(rb_index3),
+                    },
+                    poplar::program::Sequence
+                    {
+                        execute_algorithm_ipu0,
+                        execute_algorithm_ipu1,
+                        copy_to_ipu2,
+                        copy_to_ipu3
+                    },
+                    poplar::program::Sequence
+                    {
+                        copy_from_ipu0,
+                        copy_from_ipu1,
+                        execute_algorithm_ipu2,
+                        execute_algorithm_ipu3,
+                    },
+                }
+            ),
+            poplar::program::Sequence
+            {
+                copy_from_ipu2,
+                copy_from_ipu3
+            }
+        };
     }
-
-    // FIFO options. Allowing splitting of streams.
-    auto fifo_opts = poplar::OptionFlags({{"splitLimit", "52428800"}});
-
-    // Create host-to-IPU data streams and associated copy programs.
-
-    auto module_pairs_write = this->graph.addHostToDeviceFIFO(
-            "module_pairs_write",
-            poplar::FLOAT,
-            this->module_pair_buffer.size(),
-            poplar::ReplicatedStreamMode::REPLICATE,
-            fifo_opts);
-    auto copy_module_pairs = poplar::program::Copy(module_pairs_write, module_pairs);
-
-    auto hits_write = this->graph.addHostToDeviceFIFO(
-            "hits_write",
-            poplar::FLOAT,
-            this->hits_buffer.size(),
-            poplar::ReplicatedStreamMode::REPLICATE,
-            fifo_opts);
-    auto copy_hits = poplar::program::Copy(hits_write, hits);
-
-    auto phi_write = this->graph.addHostToDeviceFIFO(
-            "phi_write",
-            poplar::SHORT,
-            this->phi_buffer.size(),
-            poplar::ReplicatedStreamMode::REPLICATE,
-            fifo_opts);
-    auto copy_phi = poplar::program::Copy(phi_write, phi);
-
-    // Create a program sequence to copy data to the IPU.
-    auto copy_to_ipu = poplar::program::Sequence
+    else
     {
-        copy_module_pairs,
-        copy_hits,
-        copy_phi
-    };
-
-    // Add the host-to-IPU data transfer program.
-    this->programs.push_back(copy_to_ipu);
-
-    // Create IPU-to-host data streams and associated copy programs.
-
-    const unsigned track_size = this->num_threads* constants::max_tracks * (constants::max_track_size + 1);
-    const unsigned three_hit_track_size = this->num_threads* constants::max_tracks * 3;
-
-    auto tracks_read = this->graph.addDeviceToHostFIFO(
-            "tracks_read",
-            poplar::UNSIGNED_INT,
-            track_size,
-            fifo_opts);
-    auto copy_tracks = poplar::program::Copy(tracks, tracks_read);
-
-    auto three_hit_tracks_read = this->graph.addDeviceToHostFIFO(
-            "three_hit_tracks_read",
-            poplar::UNSIGNED_INT,
-            three_hit_track_size,
-            fifo_opts);
-    auto copy_three_hit_tracks = poplar::program::Copy(three_hit_tracks, three_hit_tracks_read);
-
-    auto num_tracks_read = this->graph.addDeviceToHostFIFO(
-            "num_tracks_read",
-            poplar::UNSIGNED_INT,
-            this->num_threads,
-            fifo_opts);
-    auto copy_num_tracks =
-        poplar::program::Copy(num_tracks, num_tracks_read);
-
-    auto num_three_hit_tracks_read = this->graph.addDeviceToHostFIFO(
-            "num_three_hit_tracks_read",
-            poplar::UNSIGNED_INT,
-            this->num_threads,
-            fifo_opts);
-    auto copy_num_three_hit_tracks =
-        poplar::program::Copy(num_three_hit_tracks, num_three_hit_tracks_read);
-
-    // Add the compute set to the programs.
-    this->programs.push_back(poplar::program::Execute(computeSet));
-
-    // Create a program sequence to copy data from the IPU.
-    auto copy_from_ipu = poplar::program::Sequence
-    {
-        copy_tracks,
-        copy_three_hit_tracks,
-        copy_num_tracks,
-        copy_num_three_hit_tracks
-    };
-
-    // Add the IPU-to-host data transfer program.
-    this->programs.push_back(copy_from_ipu);
+        // Run in a regular fashion, alternativing compute and data transfer
+        // for all of the IPUs, i.e. first copy data from the exchange to each
+        // IPU, then compute on the IPUs, and finally copy data from the IPUs
+        // back to the exchange.
+        this->program = poplar::program::Sequence
+        {
+            poplar::program::Repeat(
+                this->num_batches,
+                poplar::program::Sequence
+                {
+                    poplar::program::Sequence
+                    {
+                        copy_to_ipu0,
+                        copy_to_ipu1,
+                        copy_to_ipu2,
+                        copy_to_ipu3
+                    },
+                    poplar::program::Sequence
+                    {
+                        execute_algorithm_ipu0,
+                        execute_algorithm_ipu1,
+                        execute_algorithm_ipu2,
+                        execute_algorithm_ipu3
+                    },
+                    poplar::program::Sequence
+                    {
+                        copy_from_ipu0,
+                        copy_from_ipu1,
+                        copy_from_ipu2,
+                        copy_from_ipu3
+                    },
+                    poplar::program::Sequence
+                    {
+                        increment(rb_index0),
+                        increment(rb_index1),
+                        increment(rb_index2),
+                        increment(rb_index3),
+                    },
+                }
+            ),
+        };
+    }
 }

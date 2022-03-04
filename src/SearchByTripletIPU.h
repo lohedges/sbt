@@ -18,7 +18,6 @@
 #ifndef _SEARCHBYTRIPLETIPU_H
 #define _SEARCHBYTRIPLETIPU_H
 
-#include<tuple>
 #include<vector>
 
 #include <poplar/DeviceManager.hpp>
@@ -26,13 +25,6 @@
 #include <poplar/Graph.hpp>
 
 #include "Definitions.h"
-
-enum Program
-{
-    COPY_TO_IPU,
-    RUN_ALGORITHM,
-    COPY_FROM_IPU
-};
 
 struct Tracklet
 {
@@ -55,12 +47,17 @@ public:
         \param events
             A vector of events.
 
-        \parm is_model
-            Whether the IPU device is an IPUModel.
+        \param num_batches
+            The number of batches to process.
+
+        \param ping_pong
+            Whether to execute in a ping-pong fashion, i.e. alternating
+            compute and data transfer between pairs of the 4 IPUs.
      */
      SearchByTripletIPU(poplar::Device device,
                         std::vector<Event> events,
-                        bool is_model=false);
+                        const unsigned num_batches=20,
+                        const bool ping_pong=false);
 
     //! Execute the Search by Triplet algorithm and report timing statistics.
     /*! \param warmup
@@ -69,13 +66,8 @@ public:
 
         \param profile
             Whether to write profiling information to file.
-
-        \return num_tracks, tracks, num_three_hit_tracks, three_hit_tracks
-            The reconstructed tracks and three-hit tracks.
      */
-    std::tuple<std::vector<unsigned>, std::vector<Track>,
-               std::vector<unsigned>, std::vector<Tracklet>>
-        execute(bool warmup=false, bool profile=false);
+    void execute(bool warmup=false, bool profile=false);
 
 private:
     /// The vector of events.
@@ -87,17 +79,20 @@ private:
     /// The Poplar graph.
     poplar::Graph graph;
 
-    /// The Poplar program sequence.
-    std::vector<poplar::program::Program> programs;
+    /// The Poplar program.
+    poplar::program::Program program;
 
-    /// The number of IPU tiles to use.
+    /// The number of batches to process.
+    unsigned num_batches;
+
+    /// Whether to execute the algorithm in a ping-pong fashion.
+    bool ping_pong;
+
+    /// The number of tiles per IPU.
     unsigned num_tiles;
 
-    /// The number of IPU threads to use.
+    /// The number of IPU threads to use per IPU.
     unsigned num_threads;
-
-    /// Whether the device is an IPUModel.
-    bool is_model;
 
     /// Set up the graph program.
     void setupGraphProgram();
