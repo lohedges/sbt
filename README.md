@@ -131,7 +131,12 @@ Finished!
 
 For the above run, the 4 MK2 IPUs can process events at a throughput of around
 114600 events per second, i.e. 114.6kHz. (Note that this timing does not
-account for data transfer from the host to IPU exchange and back.)
+account for data transfer from the host to IPU exchange and back.) Note that
+this throughput is _lower_ than previous results where we used data streams to
+directly send data to the IPU tiles prior to running any compute. In this case,
+throughput was around 605kHz. Note that, for repeat runs, the remote buffer
+approach will likely be faster since you only pay the host transfer cost once
+at the start and end, rather than for every repeat.
 
 In contrast, the CPU implementation of the Search by Triplet algorithm within
 Allen can run at 3.4kHz on an Intel Xeon Silver 4215R (3.20GHz). The beefiest
