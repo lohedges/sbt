@@ -133,7 +133,7 @@ For the above run, the 4 MK2 IPUs can process events at a throughput of around
 114600 events per second, i.e. 114.6kHz. (Note that this timing does not
 account for data transfer from the host to IPU exchange and back.)
 
-contrast, the CPU implementation of the Search by Triplet algorithm within
+In contrast, the CPU implementation of the Search by Triplet algorithm within
 Allen can run at 3.4kHz on an Intel Xeon Silver 4215R (3.20GHz). The beefiest
 GPU currently used for Allen throughput measurements is the NVIDIA GeForce
 RTX 3090, which has an approximate throughput of 230kHz for the _entire_
