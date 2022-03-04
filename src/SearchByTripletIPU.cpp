@@ -49,9 +49,6 @@ SearchByTripletIPU::SearchByTripletIPU(
     // Add codelets.
     this->graph.addCodelets({"src/SearchByTripletCodelet.cpp"}, "-O3 -I src");
 
-    this->num_batches = 20;
-    this->ping_pong = false;
-
     // Setup the graph program.
     this->setupGraphProgram();
 }
