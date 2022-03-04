@@ -509,7 +509,7 @@ void SearchByTripletIPU::setupGraphProgram()
     auto num_three_hit_tracks_rb3 = this->graph.addRemoteBuffer(
         "num_three_hit_tracks_rb3", poplar::UNSIGNED_INT, this->num_threads, this->num_batches);
 
-    // Tracks identity mask.
+    // Track identity mask.
     auto track_mask0 = this->graph.addVariable(
         poplar::UNSIGNED_INT, {this->num_threads*track_mask_size}, "track_mask0");
     mapLinearlyOnOneIpu(track_mask0, 0, this->device, this->graph);
