@@ -87,7 +87,7 @@ and last iterations are different, to account for data not being on the
 IPU tiles to begin with.)
 
 After testing the above approaches we have found that throughput saturates
-after around 20 batches. In addition, the sequential method was found to give
+after around 50 batches. In addition, the sequential method was found to give
 better performance, with a throuhput of roughly 1.5x that of the ping-pong.
 
 In addition to throughput measurements, the benchmark program also validates
@@ -124,13 +124,13 @@ Reading event files...
   data/event09.txt
 Creating graph program...
 Running benchmarks...
-Events per second: 27188007.886965
+Events per second: 42141317.002340
 Validating output...
 Finished!
 ````
 
 For the above run, the 4 MK2 IPUs can process events at a throughput of around
-27200000 events per second, i.e. 27.2MHz. (Note that this timing does not
+42100000 events per second, i.e. 42.1MHz. (Note that this timing does not
 account for data transfer from the host to IPU exchange and back.)
 
 contrast, the CPU implementation of the Search by Triplet algorithm within
