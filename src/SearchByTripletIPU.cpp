@@ -313,6 +313,7 @@ void SearchByTripletIPU::setupGraphProgram()
     // Create the graph variables. For simplicity, we'll create duplicates
     // for each IPU and map them using the appropriate tile offset.
 
+    // Module pair records.
     auto module_pairs0 = this->graph.addVariable(
         poplar::FLOAT, {this->num_threads*module_pair_size}, "module_pairs0");
     mapLinearlyOnOneIpu(module_pairs0, 0, this->device, this->graph);
@@ -334,6 +335,7 @@ void SearchByTripletIPU::setupGraphProgram()
     auto module_pairs_rb3 = this->graph.addRemoteBuffer(
         "module_pairs_rb3", poplar::FLOAT, this->num_threads*module_pair_size, this->num_batches);
 
+    // Raw hits.
     auto hits0 = this->graph.addVariable(
         poplar::FLOAT, {this->num_threads*hits_size}, "hits0");
     mapLinearlyOnOneIpu(hits0, 0, this->device, this->graph);
@@ -355,6 +357,7 @@ void SearchByTripletIPU::setupGraphProgram()
     auto hits_rb3 = this->graph.addRemoteBuffer(
         "hits_rb3", poplar::FLOAT, this->num_threads*hits_size, this->num_batches);
 
+    // Phi values.
     auto phi0 = this->graph.addVariable(
         poplar::SHORT, {this->num_threads*phi_size}, "phi0");
     mapLinearlyOnOneIpu(phi0, 0, this->device, this->graph);
@@ -376,6 +379,7 @@ void SearchByTripletIPU::setupGraphProgram()
     auto phi_rb3 = this->graph.addRemoteBuffer(
         "phi_rb3", poplar::SHORT, this->num_threads*phi_size, this->num_batches);
 
+    // Candidate hits for a track.
     auto candidates0 = this->graph.addVariable(
         poplar::UNSIGNED_INT, {this->num_threads*candidates_size}, "candidates0");
     mapLinearlyOnOneIpu(candidates0, 0, this->device, this->graph);
@@ -389,6 +393,7 @@ void SearchByTripletIPU::setupGraphProgram()
         poplar::UNSIGNED_INT, {this->num_threads*candidates_size}, "candidates3");
     mapLinearlyOnOneIpu(candidates3, 3, this->device, this->graph);
 
+    // Hits that have been assigned to a track.
     auto used_hits0 = this->graph.addVariable(
         poplar::BOOL, {this->num_threads*phi_size}, "used_hits0");
     mapLinearlyOnOneIpu(used_hits0, 0, this->device, this->graph);
@@ -402,6 +407,7 @@ void SearchByTripletIPU::setupGraphProgram()
         poplar::BOOL, {this->num_threads*phi_size}, "used_hits3");
     mapLinearlyOnOneIpu(used_hits3, 3, this->device, this->graph);
 
+    // Seed tracks.
     auto tracklets0 = this->graph.addVariable(
         poplar::UNSIGNED_INT, {this->num_threads*tracklets_size}, "tracklets0");
     mapLinearlyOnOneIpu(tracklets0, 0, this->device, this->graph);
@@ -415,6 +421,7 @@ void SearchByTripletIPU::setupGraphProgram()
         poplar::UNSIGNED_INT, {this->num_threads*tracklets_size}, "tracklets3");
     mapLinearlyOnOneIpu(tracklets3, 3, this->device, this->graph);
 
+    // Assigned tracks.
     auto tracks0 = this->graph.addVariable(
         poplar::UNSIGNED_INT, {this->num_threads*tracks_size}, "tracks0");
     mapLinearlyOnOneIpu(tracks0, 0, this->device, this->graph);
@@ -436,6 +443,7 @@ void SearchByTripletIPU::setupGraphProgram()
     auto tracks_rb3 = this->graph.addRemoteBuffer(
         "tracks_rb3", poplar::UNSIGNED_INT, this->num_threads*tracks_size, this->num_batches);
 
+    // Assigned three-hit tracks.
     auto three_hit_tracks0 = this->graph.addVariable(
         poplar::UNSIGNED_INT, {this->num_threads*three_hit_tracks_size}, "three_hit_tracks0");
     mapLinearlyOnOneIpu(three_hit_tracks0, 0, this->device, this->graph);
@@ -457,6 +465,7 @@ void SearchByTripletIPU::setupGraphProgram()
     auto three_hit_tracks_rb3 = this->graph.addRemoteBuffer(
         "three_hit_tracks_rb3", poplar::UNSIGNED_INT, this->num_threads*three_hit_tracks_size, this->num_batches);
 
+    // Number of assigned tracks.
     auto num_tracks0 = this->graph.addVariable(
         poplar::UNSIGNED_INT, {this->num_threads}, "num_tracks0");
     mapLinearlyOnOneIpu(num_tracks0, 0, this->device, this->graph);
@@ -478,6 +487,7 @@ void SearchByTripletIPU::setupGraphProgram()
     auto num_tracks_rb3 = this->graph.addRemoteBuffer(
         "num_tracks_rb3", poplar::UNSIGNED_INT, this->num_threads, this->num_batches);
 
+    // Number of assigned three-hit tracks.
     auto num_three_hit_tracks0 = this->graph.addVariable(
         poplar::UNSIGNED_INT, {this->num_threads}, "num_three_hit_tracks0");
     mapLinearlyOnOneIpu(num_three_hit_tracks0, 0, this->device, this->graph);
@@ -499,6 +509,7 @@ void SearchByTripletIPU::setupGraphProgram()
     auto num_three_hit_tracks_rb3 = this->graph.addRemoteBuffer(
         "num_three_hit_tracks_rb3", poplar::UNSIGNED_INT, this->num_threads, this->num_batches);
 
+    // Tracks identity mask.
     auto track_mask0 = this->graph.addVariable(
         poplar::UNSIGNED_INT, {this->num_threads*track_mask_size}, "track_mask0");
     mapLinearlyOnOneIpu(track_mask0, 0, this->device, this->graph);
@@ -590,6 +601,7 @@ void SearchByTripletIPU::setupGraphProgram()
 
     // Create the algorithm execution program for each IPU.
 
+    // Run on IPU 0.
     const auto execute_algorithm_ipu0 = poplar::program::Sequence
     {
         createAlgorithmProgram(
@@ -607,6 +619,8 @@ void SearchByTripletIPU::setupGraphProgram()
             0
         )
     };
+
+    // Run on IPU 1.
     const auto execute_algorithm_ipu1 = poplar::program::Sequence
     {
         createAlgorithmProgram(
@@ -624,6 +638,8 @@ void SearchByTripletIPU::setupGraphProgram()
             1
         )
     };
+
+    // Run on IPU 2.
     const auto execute_algorithm_ipu2 = poplar::program::Sequence
     {
         createAlgorithmProgram(
@@ -641,6 +657,8 @@ void SearchByTripletIPU::setupGraphProgram()
             2
         )
     };
+
+    // Run on IPU 3.
     const auto execute_algorithm_ipu3 = poplar::program::Sequence
     {
         createAlgorithmProgram(
@@ -661,6 +679,7 @@ void SearchByTripletIPU::setupGraphProgram()
 
     // Create programs to copy data to/from the IPUs using the remote buffers.
 
+    // Module pair records.
     const auto copy_from_module_pairs_rb0 =
         poplar::program::Copy(module_pairs_rb0, module_pairs0, rb_index0);
     const auto copy_from_module_pairs_rb1 =
@@ -670,6 +689,7 @@ void SearchByTripletIPU::setupGraphProgram()
     const auto copy_from_module_pairs_rb3 =
         poplar::program::Copy(module_pairs_rb3, module_pairs3, rb_index3);
 
+    // Raw hits.
     const auto copy_from_hits_rb0 =
         poplar::program::Copy(hits_rb0, hits0, rb_index0);
     const auto copy_from_hits_rb1 =
@@ -679,6 +699,7 @@ void SearchByTripletIPU::setupGraphProgram()
     const auto copy_from_hits_rb3 =
         poplar::program::Copy(hits_rb3, hits3, rb_index3);
 
+    // Phi values.
     const auto copy_from_phi_rb0 =
         poplar::program::Copy(phi_rb0, phi0, rb_index0);
     const auto copy_from_phi_rb1 =
@@ -688,6 +709,7 @@ void SearchByTripletIPU::setupGraphProgram()
     const auto copy_from_phi_rb3 =
         poplar::program::Copy(phi_rb3, phi3, rb_index3);
 
+    // Assigned tracks.
     const auto copy_to_tracks_rb0 =
         poplar::program::Copy(tracks0, tracks_rb0, rb_index0);
     const auto copy_to_tracks_rb1 =
@@ -697,6 +719,7 @@ void SearchByTripletIPU::setupGraphProgram()
     const auto copy_to_tracks_rb3 =
         poplar::program::Copy(tracks3, tracks_rb3, rb_index3);
 
+    // Assigned three-hit tracks.
     const auto copy_to_three_hit_tracks_rb0 =
         poplar::program::Copy(three_hit_tracks0, three_hit_tracks_rb0, rb_index0);
     const auto copy_to_three_hit_tracks_rb1 =
@@ -706,6 +729,7 @@ void SearchByTripletIPU::setupGraphProgram()
     const auto copy_to_three_hit_tracks_rb3 =
         poplar::program::Copy(three_hit_tracks3, three_hit_tracks_rb3, rb_index3);
 
+    // Number of assigned tracks.
     const auto copy_to_num_tracks_rb0 =
         poplar::program::Copy(num_tracks0, num_tracks_rb0, rb_index0);
     const auto copy_to_num_tracks_rb1 =
@@ -715,6 +739,7 @@ void SearchByTripletIPU::setupGraphProgram()
     const auto copy_to_num_tracks_rb3 =
         poplar::program::Copy(num_tracks3, num_tracks_rb3, rb_index3);
 
+    // Number of assigned three-hit tracks.
     const auto copy_to_num_three_hit_tracks_rb0 =
         poplar::program::Copy(num_three_hit_tracks0, num_three_hit_tracks_rb0, rb_index0);
     const auto copy_to_num_three_hit_tracks_rb1 =
@@ -726,6 +751,7 @@ void SearchByTripletIPU::setupGraphProgram()
 
     // Consolidate copy programs for each IPU.
 
+    // To IPU 0.
     const auto copy_to_ipu0 = poplar::program::Sequence
     {
         copy_from_module_pairs_rb0,
@@ -733,6 +759,7 @@ void SearchByTripletIPU::setupGraphProgram()
         copy_from_phi_rb0
     };
 
+    // To IPU 1.
     const auto copy_to_ipu1 = poplar::program::Sequence
     {
         copy_from_module_pairs_rb1,
@@ -740,6 +767,7 @@ void SearchByTripletIPU::setupGraphProgram()
         copy_from_phi_rb1
     };
 
+    // To IPU 3.
     const auto copy_to_ipu2 = poplar::program::Sequence
     {
         copy_from_module_pairs_rb2,
@@ -747,6 +775,7 @@ void SearchByTripletIPU::setupGraphProgram()
         copy_from_phi_rb2
     };
 
+    // To IPU 3.
     const auto copy_to_ipu3 = poplar::program::Sequence
     {
         copy_from_module_pairs_rb3,
@@ -754,6 +783,7 @@ void SearchByTripletIPU::setupGraphProgram()
         copy_from_phi_rb3
     };
 
+    // From IPU 0.
     const auto copy_from_ipu0 = poplar::program::Sequence
     {
         copy_to_tracks_rb0,
@@ -762,6 +792,7 @@ void SearchByTripletIPU::setupGraphProgram()
         copy_to_num_three_hit_tracks_rb0
     };
 
+    // From IPU 1.
     const auto copy_from_ipu1 = poplar::program::Sequence
     {
         copy_to_tracks_rb1,
@@ -770,6 +801,7 @@ void SearchByTripletIPU::setupGraphProgram()
         copy_to_num_three_hit_tracks_rb1
     };
 
+    // From IPU 2.
     const auto copy_from_ipu2 = poplar::program::Sequence
     {
         copy_to_tracks_rb2,
@@ -778,6 +810,7 @@ void SearchByTripletIPU::setupGraphProgram()
         copy_to_num_three_hit_tracks_rb2
     };
 
+    // From IPU 3.
     const auto copy_from_ipu3 = poplar::program::Sequence
     {
         copy_to_tracks_rb3,
