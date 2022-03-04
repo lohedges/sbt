@@ -60,33 +60,46 @@ found to return numerically identical tracks in all cases.
 ## Benchmarks
 
 The `search_by_triplet` executable can be used to measure the performance
-of the algorithm on the IPU hardware. A number of events are loaded from
+of the algorithm on MK2 IPU hardware. A number of events are loaded from
 file and processed on individual tiles of the IPU. (Modulo the number
 of events, i.e. events are replicated to fill the IPU.) When run, the
-program measures timing statistics for data transfer to the IPU, the
-algorithm run time, and data transfer from the IPU back to the host.
-Throughput mesures (number of events per second) are reported as a raw
-value, i.e. the algorithm compute speed only, and as an overall value
-that accounts for the _full_ run time, i.e. including data transfer
-(which will be optimised in future).
+program measures timing statistics for running batches of events on four
+IPUs. To run in batches we make use of _remote buffers_ on the IPU, which
+reside in the IPU exchange memory. This allows us to store replicates of
+buffers up to 256MiB in size, from which we can transfer data to/from
+the IPU tiles. Due to this size restriction, we can currently only utilise
+a single thread per IPU tile due to the size of the remote buffers needed
+for the algorithm.
 
-Currently the benchmarks are only applicable to MK2 IPU hardware, since the
-size of data buffers have been tuned to the size of the MK2 tile memory.
-At present, due to memory restrictions, we are only able to utilise 3 of the
-hardware threads on each tile, hence throughput could potentially be doubled if
-it is possible to restructure the algorithm, or lower the memory footprint of
-the intermediate data structures required by the algorithm.
+The code allows us to test different strategies for arranging the data
+transfer and compute. We have tried a sequential process where data
+transfer and compute are alternated for each of the IPUs simultaneously,
+and a ping-pong approach where we alternate data transfer and compute
+between pairs IPUs.
+
+* _Sequential_: All IPUs load data from the exchange, then compute, then
+copy back to the exchange. This is repeated `num_batches` times.
+
+* Ping-pong: IPUs 0 and 1 copy data from the exchange while IPUs 2 and 3
+compute. IPUs 0 and 1 then compute while IPUs 2 and 3 copy results back
+to the exchange. This is repeated `num_batches` times. (Note that the first
+and last iterations are different, to account for data not being on the
+IPU tiles to begin with.)
+
+After testing the above approaches we have found that throughput saturates
+after around 20 batches. In addition, the sequential method was found to give
+better performance, with a throuhput of roughly 1.5x that of the ping-pong.
+
+In addition to throughput measurements, the benchmark program also validates
+that the output of the replicates is identical.
 
 To run the benchmarks:
 
 ```
-./search_by_triplet num_ipus
+./search_by_triplet
 ```
 
-where `num_ipus` is in the range 1 to 4. (This defaults to 1.) If no IPU device
-is found, an `IPUModel` emulator will be used and the specified number of
-IPUs is ignored. (In this situation, timing statistics are meaningless.)
-Running the program using 4 IPUs should give output like:
+Running the program should give output like:
 
 ```
 Scanning event directory...
@@ -110,35 +123,21 @@ Reading event files...
   data/event08.txt
   data/event09.txt
 Creating graph program...
-Running benchmarks on 4 IPUs...
-Results...
-  Copy to IPU took: 0.001840 ms
-  Algorithm execution took: 0.000029 ms
-  Raw events per second: 605445.264478
-  Copy from IPU took: 0.000636 ms
-  Events per second: 7052.187321
+Running benchmarks...
+Events per second: 27188007.886965
+Validating output...
+Finished!
 ````
 
 For the above run, the 4 MK2 IPUs can process events at a throughput of around
-605000 events per second, i.e. 605kHz. Accounting for data transfer to/from
-the IPU, the throughput drops to around 7kHz. However, we should be able to
-interleave data transfer with compute, e.g. ping-ponging data transfer and
-compute between IPUs, or streaming many more events to the IPU exchange to be
-processed in larger batches.
+27200000 events per second, i.e. 27.2MHz. (Note that this timing does not
+account for data transfer from the host to IPU exchange and back.)
 
-In contrast, the CPU implementation of the Search by Triplet algorithm within
-Allen can run at 3.4kHz on an Intel Xeon Silver 4215R (3.20GHz), i.e. the IPU
-can process about 2 times as many events per second when data transfer is included.
-The beefiest GPU currently used for Allen throughput measurements is the NVIDIA
-GeForce RTX 3090, which has an approximate throughput of 230kHz for the _entire_
-reconstruction sequence!
-
-The next steps are 1) thinking of ways to reduce the algorithm's memory footprint,
-so that we can use _all_ of the hardare threads available on the IPU; 2)
-developing strategies to utilise the large amount of IPU exchange memory, i.e.
-transferring (potentially in the background) events to the exchange, which
-could then be processed in larger batches; and 3) looking at ways to minimise
-the data transfer cost by interleaving with compute.
+contrast, the CPU implementation of the Search by Triplet algorithm within
+Allen can run at 3.4kHz on an Intel Xeon Silver 4215R (3.20GHz). The beefiest
+GPU currently used for Allen throughput measurements is the NVIDIA GeForce
+RTX 3090, which has an approximate throughput of 230kHz for the _entire_
+reconstruction sequence, i.e. not just the search by triplet algorithm.
 
 ## Data
 
@@ -151,4 +150,3 @@ pair. Following this comes the hit records for the module pair. Each record
 contains the x, y, and z position of the hit, along with the phi value in
 `int16_t` format, and the module index associated with the hit. Within an
 event file, module pair records are separated by newlines.
-
