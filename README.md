@@ -124,13 +124,13 @@ Reading event files...
   data/event09.txt
 Creating graph program...
 Running benchmarks...
-Events per second: 42141317.002340
+Events per second: 114566.247399
 Validating output...
 Finished!
 ````
 
 For the above run, the 4 MK2 IPUs can process events at a throughput of around
-42100000 events per second, i.e. 42.1MHz. (Note that this timing does not
+114600 events per second, i.e. 114.6kHz. (Note that this timing does not
 account for data transfer from the host to IPU exchange and back.)
 
 contrast, the CPU implementation of the Search by Triplet algorithm within
