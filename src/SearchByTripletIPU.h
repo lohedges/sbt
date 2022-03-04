@@ -56,7 +56,7 @@ public:
      */
      SearchByTripletIPU(poplar::Device device,
                         std::vector<Event> events,
-                        const unsigned num_batches=20,
+                        const unsigned num_batches=50,
                         const bool ping_pong=false);
 
     //! Execute the Search by Triplet algorithm and report timing statistics.
