@@ -203,7 +203,7 @@ void  SearchByTripletIPU::execute(bool warmup, bool profile)
 
     // Number of tracks.
     engine.copyFromRemoteBuffer("num_tracks_rb0", num_tracks0.data(), 0);
-    engine.copyFromRemoteBuffer("num_tracks_rb1", num_tracks1.data(), 1);
+    engine.copyFromRemoteBuffer("num_tracks_rb1", num_tracks1.data(), this->num_batches-1);
     for (unsigned i=0; i<num_tracks0.size(); ++i)
     {
         assert(num_tracks0[i] == num_tracks1[i]);
@@ -211,7 +211,7 @@ void  SearchByTripletIPU::execute(bool warmup, bool profile)
 
     // Number of three-hit tracks.
     engine.copyFromRemoteBuffer("num_three_hit_tracks_rb0", num_three_hit_tracks0.data(), 0);
-    engine.copyFromRemoteBuffer("num_three_hit_tracks_rb1", num_three_hit_tracks1.data(), 1);
+    engine.copyFromRemoteBuffer("num_three_hit_tracks_rb1", num_three_hit_tracks1.data(), this->num_batches-1);
     for (unsigned i=0; i<num_three_hit_tracks0.size(); ++i)
     {
         assert(num_three_hit_tracks0[i] == num_three_hit_tracks1[i]);
@@ -219,7 +219,7 @@ void  SearchByTripletIPU::execute(bool warmup, bool profile)
 
     // Tracks.
     engine.copyFromRemoteBuffer("tracks_rb0", tracks0.data(), 0);
-    engine.copyFromRemoteBuffer("tracks_rb1", tracks1.data(), 1);
+    engine.copyFromRemoteBuffer("tracks_rb1", tracks1.data(), this->num_batches-1);
     for (unsigned i=0; i<tracks0.size(); ++i)
     {
         assert(tracks0[i].num_hits == tracks1[i].num_hits);
@@ -231,7 +231,7 @@ void  SearchByTripletIPU::execute(bool warmup, bool profile)
 
     // Three-hit tracks.
     engine.copyFromRemoteBuffer("three_hit_tracks_rb0", three_hit_tracks0.data(), 0);
-    engine.copyFromRemoteBuffer("three_hit_tracks_rb1", three_hit_tracks1.data(), 1);
+    engine.copyFromRemoteBuffer("three_hit_tracks_rb1", three_hit_tracks1.data(), this->num_batches-1);
     for (unsigned i=0; i<three_hit_tracks0.size(); ++i)
     {
         assert(three_hit_tracks0[i].hits[0] == three_hit_tracks1[i].hits[0]);
