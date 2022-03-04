@@ -184,7 +184,7 @@ void  SearchByTripletIPU::execute(bool warmup, bool profile)
     // Calculate run time per event in seconds.
     auto secs = std::chrono::duration<double>(elapsed).count();
 
-    auto events_per_sec = (this->num_tiles*this->num_threads*this->num_batches) / secs;
+    auto events_per_sec = (4*this->num_threads*this->num_batches) / secs;
     std::cout << "Events per second: "<< std::fixed << events_per_sec << "\n";
 
     // Write profiling information to file.
