@@ -407,7 +407,8 @@ void SearchByTripletIPU::setupGraphProgram()
         mapLinearlyOnOneIpu(track_mask, ipu_num, this->device, this->graph);
 
         // Create a compute set.
-        auto computeSet = this->graph.addComputeSet("computeSet");
+        name = "compute_set_" + std::to_string(ipu_num) + std::to_string(thread_num);
+        auto compute_set = this->graph.addComputeSet(name);
 
         // Work out the starting tile index.
         const auto start_tile = ipu_num*this->num_tiles;
@@ -420,7 +421,7 @@ void SearchByTripletIPU::setupGraphProgram()
             const auto tile = start_tile + i;
 
             // Add a vertex to the compute set.
-            auto vtx = this->graph.addVertex(computeSet, "SearchByTriplet");
+            auto vtx = this->graph.addVertex(compute_set, "SearchByTriplet");
 
             // Connect variables to vertex inputs and outputs.
             this->graph.connect(
@@ -462,7 +463,7 @@ void SearchByTripletIPU::setupGraphProgram()
         }
 
         // Add to the compute programs for this tile.
-        compute.add(poplar::program::Execute(computeSet));
+        compute.add(poplar::program::Execute(compute_set));
 
         // Add to the copy to IPU programs for this tile.
         copy_to_ipu.add(poplar::program::Copy(module_pairs_rb, module_pairs, rb_index));
