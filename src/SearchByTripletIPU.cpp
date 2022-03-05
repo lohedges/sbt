@@ -311,16 +311,6 @@ void SearchByTripletIPU::setupGraphProgram()
         }
     };
 
-    auto track_mask1 = this->graph.addVariable(
-        poplar::UNSIGNED_INT, {this->num_tiles*track_mask_size}, "track_mask1");
-    mapLinearlyOnOneIpu(track_mask1, 1, this->device, this->graph);
-    auto track_mask2 = this->graph.addVariable(
-        poplar::UNSIGNED_INT, {this->num_tiles*track_mask_size}, "track_mask2");
-    mapLinearlyOnOneIpu(track_mask2, 2, this->device, this->graph);
-    auto track_mask3 = this->graph.addVariable(
-        poplar::UNSIGNED_INT, {this->num_tiles*track_mask_size}, "track_mask3");
-    mapLinearlyOnOneIpu(track_mask3, 3, this->device, this->graph);
-
     // Lambda to create the programs for each IPU and thread.
     auto createPrograms = [&](
         const int ipu_num,
