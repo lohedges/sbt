@@ -419,13 +419,11 @@ void SearchByTripletIPU::setupGraphProgram()
         // Create a compute set.
         auto computeSet = this->graph.addComputeSet("computeSet");
 
-        // Add a vertex for each thread that will be used on the tile
-        // and connect tensor slices to vertex inputs and outputs.
-
         // Work out the starting tile index.
         const auto start_tile = ipu_num*this->num_tiles;
 
-        // Loop over all tiles.
+        // Loop over all tiles and add a vertex for each, connecting inputs
+        // and outputs to the appropriate slices of the tensors above.
         for (unsigned i=0; i<this->num_tiles; ++i)
         {
             // Work out the tile index.
@@ -505,7 +503,7 @@ void SearchByTripletIPU::setupGraphProgram()
         }
     }
 
-    // Lambda function to increment the remote buffer indices.
+    // Lambda function to increment the remote buffer index.
     const auto increment = [&](poplar::Tensor &t)
     {
         poplar::program::Sequence s;
@@ -513,7 +511,7 @@ void SearchByTripletIPU::setupGraphProgram()
         return s;
     };
 
-    // Run in alternating compute and data transferfor all of the IPUs, i.e.
+    // Run alternating compute and data transferfor all of the IPUs, i.e.
     // first copy data from the exchange to each IPU, then compute on the IPUs,
     // and finally copy data from the IPUs back to the exchange.
     this->program = poplar::program::Sequence
