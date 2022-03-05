@@ -56,8 +56,7 @@ public:
      */
      SearchByTripletIPU(poplar::Device device,
                         std::vector<Event> events,
-                        const unsigned num_batches=50,
-                        const bool ping_pong=false);
+                        const unsigned num_batches=50);
 
     //! Execute the Search by Triplet algorithm and report timing statistics.
     /*! \param warmup
@@ -85,14 +84,11 @@ private:
     /// The number of batches to process.
     unsigned num_batches;
 
-    /// Whether to execute the algorithm in a ping-pong fashion.
-    bool ping_pong;
+    /// The number of IPUs.
+    unsigned num_ipus;
 
     /// The number of tiles per IPU.
     unsigned num_tiles;
-
-    /// The number of IPU threads to use per IPU.
-    unsigned num_threads;
 
     /// Set up the graph program.
     void setupGraphProgram();
