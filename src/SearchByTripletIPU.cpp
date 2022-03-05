@@ -253,10 +253,6 @@ void  SearchByTripletIPU::execute(bool warmup, bool profile)
 
 void SearchByTripletIPU::setupGraphProgram()
 {
-    // We will use remote buffers to hold num_batches copies of the event data.
-    // This will be processed by 2 IPUs at a time in a ping-pong fashion, i.e.
-    // IPUs 0 and 1 will compute while IPUs 2 and 3 transfer data, and vice-versa.
-
     // Store the number of module pairs. (Assume this is the same for all events.)
     const auto num_module_pairs = this->events[0].getModulePairs().size();
 
