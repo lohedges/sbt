@@ -18,7 +18,7 @@
 #ifndef _SEARCHBYTRIPLETIPU_H
 #define _SEARCHBYTRIPLETIPU_H
 
-#include<vector>
+#include <vector>
 
 #include <poplar/DeviceManager.hpp>
 #include <poplar/Engine.hpp>
