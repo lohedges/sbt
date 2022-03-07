@@ -498,7 +498,7 @@ void SearchByTripletIPU::setupGraphProgram()
         return s;
     };
 
-    // Run alternating compute and data transferfor all of the IPUs, i.e.
+    // Run alternating compute and data transfer for all of the IPUs, i.e.
     // first copy data from the exchange to each IPU, then compute on the IPUs,
     // and finally copy data from the IPUs back to the exchange.
     this->program = poplar::program::Sequence
