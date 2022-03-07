@@ -89,6 +89,12 @@ IPU tiles to begin with.)
 After testing the above approaches we have found that throughput saturates
 after around 50 batches. In addition, the sequential method was found to give
 better performance, with a throuhput of roughly 1.5x that of the ping-pong.
+For our setup, 50 batches with a single thread per IPU tile on all IPUs is
+approximately at the limit of the available remote buffer memory. Reducing
+the number of batches to 25 allows us to use two threads per tile, but this
+was found to result in slightly reduced throughput. Regardless of the batch
+size, it is not possible to use more than two threads, since this puts us
+beyond the limit of the available tile memory.
 
 In addition to throughput measurements, the benchmark program also validates
 that the output of the replicates is identical.
