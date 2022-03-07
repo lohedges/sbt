@@ -26,6 +26,14 @@
 #include "EventReader.h"
 #include "SearchByTripletIPU.h"
 
+// Set the number of threads. For the default batch size of 50, using a single
+// thread is puts us at the available remote buffer memory limit. If the number
+// of batches is reduced, then the number of threads can be increased
+// accordingly, i.e. if num_batches = 25, then we can set num_threads = 2.
+// Note that graph compilation will fail with an uninformative segmentation
+// fault when the remote buffer memory is exceeded. Regardless of num_batches,
+// it is not possible to use num_threads > 2, since we will exceed the
+// available per-tile memory.
 constexpr unsigned num_threads = 1;
 
 SearchByTripletIPU::SearchByTripletIPU(
