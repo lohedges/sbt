@@ -195,9 +195,9 @@ Finished!
 For the above run, when using data streams, the 4 MK2 IPUs can process events at
 a throughput of around 603000 events per second, i.e. 603kHz. (Note that this
 timing does not account for data transfer from the host to IPU exchange and back.)
-In contrast, the remote buffer approach, which uses half the threads per tile,
-has a throughput of around 115kHz. When including the cost of data transfer to
-and from the host, the throughput falls to around 7kHz when using data streams,
+In contrast, the remote buffer approach, which uses a third of the threads per
+tile, has a throughput of around 115kHz. When including the cost of data transfer
+to and from the host, the throughput falls to around 7kHz when using data streams,
 and around 18kHz when using remote buffers. Processing 25 times the number of
 events gives a gain of only 2.5x throughput, implying that the time taken for
 compute is still too short relative to the data transfer time.
