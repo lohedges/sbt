@@ -199,9 +199,9 @@ timing does not account for data transfer from the host to IPU exchange and back
 In contrast, the remote buffer approach, which uses a third of the threads per
 tile, has a throughput of around 115kHz. When including the cost of data transfer
 to and from the host, the throughput falls to around 7kHz when using data streams,
-and around 30kHz when using remote buffers. Processing 25 times the number of
-events gives a gain of only 4x throughput, implying that the time taken for
-compute is still too short relative to the data transfer time.
+and around 30kHz when using remote buffers. Processing roughly 17 times the
+number of events gives a gain of only 4x throughput, implying that the time taken
+for compute is still too short relative to the data transfer time.
 
 In contrast, the CPU implementation of the Search by Triplet algorithm within
 Allen can run at 3.4kHz on an Intel Xeon Silver 4215R (3.20GHz). The beefiest
