@@ -76,7 +76,8 @@ reside in the IPU exchange memory. This allows us to store replicates of
 buffers up to 256MiB in size, from which we can transfer data to/from
 the IPU tiles. Due to this size restriction, we can currently only utilise
 a single thread per IPU tile due to the size of the remote buffers needed
-for the algorithm.
+for the algorithm. To speed up data transfer to/from the remote buffers we
+wrap the copy commands in OpenMP parallel loops.
 
 Using remote buffers we also tested different strategies for arranging the
 data transfer and compute. We tried a sequential process where data transfer
@@ -181,15 +182,13 @@ Reading event files...
 Creating graph program...
 Using remote buffers...
 Running benchmarks...
-Using remote buffers...
-Running benchmarks...
 Results...
-  Copy to remote buffers took: 0.010830 ms
+  Copy to remote buffers took: 0.004324 ms
   Algorithm execution took: 0.002572 ms
-  Raw events per second: 114466.929966
-  Copy from remote buffers took: 0.003039 ms
-  Events per second: 17907.093277
-  Compute time: 15.64 %
+  Raw events per second: 114468.239226
+  Copy from remote buffers took: 0.002933 ms
+  Events per second: 29951.974912
+  Compute time: 26.17 %
 Validating output...
 Finished!
 ````
@@ -200,8 +199,8 @@ timing does not account for data transfer from the host to IPU exchange and back
 In contrast, the remote buffer approach, which uses a third of the threads per
 tile, has a throughput of around 115kHz. When including the cost of data transfer
 to and from the host, the throughput falls to around 7kHz when using data streams,
-and around 18kHz when using remote buffers. Processing 25 times the number of
-events gives a gain of only 2.5x throughput, implying that the time taken for
+and around 30kHz when using remote buffers. Processing 25 times the number of
+events gives a gain of only 4x throughput, implying that the time taken for
 compute is still too short relative to the data transfer time.
 
 In contrast, the CPU implementation of the Search by Triplet algorithm within

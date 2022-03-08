@@ -348,6 +348,7 @@ void SearchByTripletIPU::executeRemoteBuffers(bool warmup, bool profile)
     auto start = std::chrono::high_resolution_clock::now();
 
     // Loop over batches.
+    #pragma omp parallel for
     for (unsigned i=0; i<this->num_batches; ++i)
     {
         // Loop over tiles.
@@ -439,6 +440,7 @@ void SearchByTripletIPU::executeRemoteBuffers(bool warmup, bool profile)
     start = std::chrono::high_resolution_clock::now();
 
     // Loop over batches.
+    #pragma omp parallel for
     for (unsigned i=0; i<this->num_batches; ++i)
     {
         // Loop over tiles.
