@@ -26,6 +26,13 @@
 
 #include "Definitions.h"
 
+enum Program
+{
+    COPY_TO_IPU,
+    RUN_ALGORITHM,
+    COPY_FROM_IPU
+};
+
 struct Tracklet
 {
     unsigned hits[3];
@@ -49,10 +56,6 @@ public:
 
         \param num_batches
             The number of batches to process.
-
-        \param ping_pong
-            Whether to execute in a ping-pong fashion, i.e. alternating
-            compute and data transfer between pairs of the 4 IPUs.
      */
      SearchByTripletIPU(poplar::Device device,
                         std::vector<Event> events,
@@ -81,6 +84,9 @@ private:
     /// The Poplar program.
     poplar::program::Program program;
 
+	/// The Poplar program sequence.
+    std::vector<poplar::program::Program> programs;
+
     /// The number of batches to process.
     unsigned num_batches;
 
@@ -90,8 +96,36 @@ private:
     /// The number of tiles per IPU.
     unsigned num_tiles;
 
-    /// Set up the graph program.
-    void setupGraphProgram();
+    /// The number of threads per tile.
+    unsigned num_threads;
+
+    /// Create the graph program using data streams.
+    void createGraphProgramDataStreams();
+
+    /// Create the graph program using remote buffers streams.
+    void createGraphProgramRemoteBuffers();
+
+    //! Execute the Search by Triplet algorithm using data streams and report
+    //  timing statistics.
+    /*! \param warmup
+            Whether to perform a "warmup" run. This can be useful when
+            benchmarking.
+
+        \param profile
+            Whether to write profiling information to file.
+     */
+    void executeDataStreams(bool warmup=false, bool profile=false);
+
+    //! Execute the Search by Triplet algorithm using remote buffers and report
+    //  timing statistics.
+    /*! \param warmup
+            Whether to perform a "warmup" run. This can be useful when
+            benchmarking.
+
+        \param profile
+            Whether to write profiling information to file.
+     */
+    void executeRemoteBuffers(bool warmup=false, bool profile=false);
 
     /// Buffer for storing flattened module pair data.
     std::vector<float> module_pair_buffer;

@@ -16,6 +16,7 @@
 */
 
 #include <iostream>
+#include <sstream>
 #include <vector>
 
 #include <poplar/DeviceManager.hpp>
@@ -27,8 +28,27 @@
 /// Setup and connect to a Poplar IPU device.
 poplar::Device setIpuDevice();
 
-int main()
+int main(int argc, char *argv[])
 {
+    bool is_remote_buffer = false;
+    unsigned num_batches = 1;
+
+    // Get the remote buffer flag.
+    if (argc > 1)
+    {
+        std::string s(argv[1]);
+        std::stringstream ss(argv[1]);
+
+        if (not (ss >> std::boolalpha >> is_remote_buffer))
+        {
+            std::cerr << "Invalid remote buffer flag: " << s << '\n';
+            exit(-1);
+        }
+
+        // Process 50 replicates using remote buffers.
+        num_batches = 50;
+    }
+
     // Read events from file.
     EventReader event_reader(std::filesystem::path("data"), true);
     event_reader.readEvents(true);
@@ -39,7 +59,8 @@ int main()
     // Setup the graph program.
     std::cout << "Creating graph program...\n";
     SearchByTripletIPU search_by_triplet(std::move(device),
-                                         event_reader.getEvents());
+                                         event_reader.getEvents(),
+                                         num_batches);
                                          
 
     search_by_triplet.execute();
