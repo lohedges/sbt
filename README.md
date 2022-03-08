@@ -144,7 +144,7 @@ Results...
   Raw events per second: 603031.029777
   Copy from IPU took: 0.000633 ms
   Events per second: 7058.866838
-  Compute time fraction: 1.16 %
+  Compute time: 1.16 %
 Validating output...
 Finished!
 ````
@@ -189,7 +189,7 @@ Results...
   Raw events per second: 114466.929966
   Copy from remote buffers took: 0.003039 ms
   Events per second: 17907.093277
-  Compute time fraction: 15.64 %
+  Compute time: 15.64 %
 Validating output...
 Finished!
 ````
