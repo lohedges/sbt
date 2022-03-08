@@ -171,6 +171,7 @@ void SearchByTripletIPU::executeDataStreams(bool warmup, bool profile)
 
     // Work out run time in seconds.
     secs = std::chrono::duration<double>(elapsed).count();
+    const auto compute_secs = secs;
 
     // Report timing.
     std::cout << "  Algorithm execution took: " << std::fixed << secs/1000 << " ms\n";
@@ -202,6 +203,9 @@ void SearchByTripletIPU::executeDataStreams(bool warmup, bool profile)
     // Overall throughput.
     events_per_sec = (this->num_ipus*this->num_tiles*this->num_threads) / total_secs;
     std::cout << "  Events per second: " << std::fixed << events_per_sec << "\n";
+
+    // Fractional time on compute.
+    std::cout << "  Compute time fraction: " << std::setprecision(2) << (compute_secs/total_secs) << " %\n";
 
     // num_batches-1.
     std::cout << "Validating output...\n";
@@ -393,6 +397,7 @@ void SearchByTripletIPU::executeRemoteBuffers(bool warmup, bool profile)
 
     // Calculate run time per event in seconds.
     secs = std::chrono::duration<double>(elapsed).count();
+    const auto compute_secs = secs;
 
     // Update the total run time.
     total_secs += secs;
@@ -481,6 +486,9 @@ void SearchByTripletIPU::executeRemoteBuffers(bool warmup, bool profile)
     // Overall throughput.
     events_per_sec = (this->num_ipus*this->num_threads*this->num_tiles*this->num_batches) / total_secs;
     std::cout << "  Events per second: " << std::fixed << events_per_sec << "\n";
+
+    // Fractional time on compute.
+    std::cout << "  Compute time fraction: " << std::setprecision(2) << (compute_secs/total_secs) << " %\n";
 
     // Validate output.
     std::cout << "Validating output...\n";
