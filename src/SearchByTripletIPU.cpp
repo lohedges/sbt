@@ -54,11 +54,13 @@ SearchByTripletIPU::SearchByTripletIPU(
     // available per-tile memory.
     if (this->num_batches > 1)
     {
+        std::cout << "Using remote buffers...\n";
         this->num_threads = 1;
         this->createGraphProgramRemoteBuffers();
     }
     else
     {
+        std::cout << "Using data streams...\n";
         this->num_threads = 3;
         this->createGraphProgramDataStreams();
     }
@@ -78,6 +80,7 @@ void SearchByTripletIPU::execute(bool warmup, bool profile)
 
 void SearchByTripletIPU::executeDataStreams(bool warmup, bool profile)
 {
+
     // Initialise the Poplar engine and load the IPU device.
 
     auto optionFlags = poplar::OptionFlags{};
@@ -100,15 +103,18 @@ void SearchByTripletIPU::executeDataStreams(bool warmup, bool profile)
         };
     }
 
+    // Store the total number of threads.
+    const auto total_threads = this->num_ipus*this->num_tiles*this->num_threads;
+
     // Create buffers for IPU-to-host streams.
-    std::vector<unsigned> num_tracks(this->num_tiles*this->num_threads);
-    std::vector<unsigned> num_three_hit_tracks(this->num_tiles*this->num_threads);
+    std::vector<unsigned> num_tracks(total_threads);
+    std::vector<unsigned> num_three_hit_tracks(total_threads);
 
-    std::vector<Track> tracks(this->num_tiles*this->num_threads*constants::max_tracks);
-    std::vector<Tracklet> three_hit_tracks(this->num_tiles*this->num_threads*constants::max_tracks);
+    std::vector<Track> tracks(total_threads*constants::max_tracks);
+    std::vector<Tracklet> three_hit_tracks(total_threads*constants::max_tracks);
 
-    const unsigned track_size = this->num_threads*constants::max_tracks*(constants::max_track_size + 1);
-    const unsigned three_hit_track_size = this->num_threads*constants::max_tracks*3;
+    const unsigned track_size = total_threads*constants::max_tracks*(constants::max_track_size + 1);
+    const unsigned three_hit_track_size = total_threads*constants::max_tracks*3;
 
     // Create the engine and load the IPU device.
     poplar::Engine engine(this->graph, this->programs, optionFlags);
@@ -168,7 +174,7 @@ void SearchByTripletIPU::executeDataStreams(bool warmup, bool profile)
 
     // Report timing.
     std::cout << "  Algorithm execution took: " << std::fixed << secs/1000 << " ms\n";
-    auto events_per_sec = (this->num_tiles*this->num_threads) / secs;
+    auto events_per_sec = (this->num_ipus*this->num_tiles*this->num_threads) / secs;
     std::cout << "  Raw events per second: "<< std::fixed << events_per_sec << "\n";
 
     // Update the total run time.
@@ -194,40 +200,47 @@ void SearchByTripletIPU::executeDataStreams(bool warmup, bool profile)
     std::cout << "  Copy from IPU took: " << std::fixed << secs/1000 << " ms\n";
 
     // Overall throughput.
-    events_per_sec = (this->num_tiles*this->num_threads) / total_secs;
+    events_per_sec = (this->num_ipus*this->num_tiles*this->num_threads) / total_secs;
     std::cout << "  Events per second: " << std::fixed << events_per_sec << "\n";
 
     // num_batches-1.
     std::cout << "Validating output...\n";
 
+    // Store the number of events.
+    const auto num_events = this->events.size();
+
+    // Store the total number of threads on a single IPU.
+    const auto ipu_threads = this->num_tiles*this->num_threads;
+
     // Number of tracks.
-    for (unsigned i=0; i<this->num_threads; ++i)
+    for (unsigned i=0; i<ipu_threads; ++i)
     {
-        assert(num_tracks[i] == num_tracks[i+this->num_threads]);
+        assert(num_tracks[i] == num_tracks[i+num_events]);
     }
 
     // Number of three-hit tracks.
-    for (unsigned i=0; i<this->num_threads; ++i)
+    for (unsigned i=0; i<ipu_threads; ++i)
     {
-        assert(num_three_hit_tracks[i] == num_three_hit_tracks[i+this->num_threads]);
+        assert(num_three_hit_tracks[i] == num_three_hit_tracks[i+num_events]);
     }
 
     // Tracks.
-    for (unsigned i=0; i<track_size; ++i)
+    const auto offset = num_events*constants::max_tracks;
+    for (unsigned i=0; i<ipu_threads; ++i)
     {
-        assert(tracks[i].num_hits == tracks[i+track_size].num_hits);
+        assert(tracks[i].num_hits == tracks[i+offset].num_hits);
         for (unsigned j=0; j<tracks[i].num_hits; ++j)
         {
-            assert(tracks[i].hits[j] == tracks[i+track_size].hits[j]);
+            assert(tracks[i].hits[j] == tracks[i+offset].hits[j]);
         }
     }
 
     // Three-hit tracks.
-    for (unsigned i=0; i<three_hit_track_size; ++i)
+    for (unsigned i=0; i<ipu_threads; ++i)
     {
-        assert(three_hit_tracks[i].hits[0] == three_hit_tracks[i+three_hit_track_size].hits[0]);
-        assert(three_hit_tracks[i].hits[1] == three_hit_tracks[i+three_hit_track_size].hits[1]);
-        assert(three_hit_tracks[i].hits[2] == three_hit_tracks[i+three_hit_track_size].hits[2]);
+        assert(three_hit_tracks[i].hits[0] == three_hit_tracks[i+offset].hits[0]);
+        assert(three_hit_tracks[i].hits[1] == three_hit_tracks[i+offset].hits[1]);
+        assert(three_hit_tracks[i].hits[2] == three_hit_tracks[i+offset].hits[2]);
     }
 
     // Write profiling information to file.
@@ -538,7 +551,7 @@ void SearchByTripletIPU::createGraphProgramDataStreams()
     const auto track_mask_size = constants::max_tracks_to_follow;
 
     // Store the total number of threads.
-    const auto total_threads = this->num_tiles*this->num_threads;
+    const auto total_threads = this->num_ipus*this->num_tiles*this->num_threads;
 
     // Resize buffers.
     this->module_pair_buffer.resize(total_threads*module_pair_size);
@@ -549,35 +562,35 @@ void SearchByTripletIPU::createGraphProgramDataStreams()
 
     poplar::Tensor module_pairs
         = this->graph.addVariable(poplar::FLOAT,
-                                  {total_threads* module_pair_size},
+                                  {total_threads*module_pair_size},
                                   "module_pairs");
     poplar::Tensor hits
         = this->graph.addVariable(poplar::FLOAT,
-                                  {total_threads* hits_size},
+                                  {total_threads*hits_size},
                                   "hits");
     poplar::Tensor phi
         = this->graph.addVariable(poplar::SHORT,
-                                  {total_threads* phi_size},
+                                  {total_threads*phi_size},
                                   "phi");
     poplar::Tensor candidates
         = this->graph.addVariable(poplar::UNSIGNED_INT,
-                                  {total_threads* candidates_size},
+                                  {total_threads*candidates_size},
                                   "candidates");
     poplar::Tensor used_hits
         = this->graph.addVariable(poplar::BOOL,
-                                  {total_threads* phi_size},
+                                  {total_threads*phi_size},
                                   "used_hits");
     poplar::Tensor tracklets
         = this->graph.addVariable(poplar::UNSIGNED_INT,
-                                  {total_threads* tracklets_size},
+                                  {total_threads*tracklets_size},
                                   "tracklets");
     poplar::Tensor tracks
         = this->graph.addVariable(poplar::UNSIGNED_INT,
-                                  {total_threads* tracks_size},
+                                  {total_threads*tracks_size},
                                   "tracks");
     poplar::Tensor three_hit_tracks
         = this->graph.addVariable(poplar::UNSIGNED_INT,
-                                  {total_threads* three_hit_tracks_size},
+                                  {total_threads*three_hit_tracks_size},
                                   "three_hit_tracks");
     poplar::Tensor num_tracks
         = this->graph.addVariable(poplar::UNSIGNED_INT,
@@ -589,7 +602,7 @@ void SearchByTripletIPU::createGraphProgramDataStreams()
                                   "num_three_hit_tracks");
     poplar::Tensor track_mask
         = this->graph.addVariable(poplar::UNSIGNED_INT,
-                                  {total_threads * track_mask_size},
+                                  {total_threads*track_mask_size},
                                   "track_mask");
 
     // Create a compute set.
