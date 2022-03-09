@@ -117,7 +117,9 @@ void SearchByTripletIPU::executeDataStreams(bool warmup, bool profile)
     const unsigned three_hit_track_size = total_threads*constants::max_tracks*3;
 
     // Create the engine and load the IPU device.
+    std::cout << "Compiling graph program...\n";
     poplar::Engine engine(this->graph, this->programs, optionFlags);
+    std::cout << "Loading program to device...\n";
     engine.load(this->device);
 
     // Connect the data streams.
@@ -336,7 +338,9 @@ void SearchByTripletIPU::executeRemoteBuffers(bool warmup, bool profile)
     }
 
     // Create the engine and load the IPU device.
+    std::cout << "Compiling graph program...\n";
     poplar::Engine engine(this->graph, this->program, optionFlags);
+    std::cout << "Loading program to device...\n";
     engine.load(this->device);
 
     std::cout << "Running benchmarks...\n";
