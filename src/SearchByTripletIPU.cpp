@@ -50,8 +50,9 @@ SearchByTripletIPU::SearchByTripletIPU(
     // accordingly, i.e. if num_batches = 25, then we can set num_threads = 2.
     // Note that graph compilation will fail with an uninformative segmentation
     // fault when the remote buffer memory is exceeded. Regardless of num_batches,
-    // it is not possible to use num_threads > 2, since we will exceed the
-    // available per-tile memory.
+    // when using remote buffers it is not possible to use num_threads > 2, since
+    // we will exceed the available per-tile memory. Processing a single batch,
+    // instead using data streams for IO allows us to user 3 threads per tile.
     if (this->num_batches > 1)
     {
         std::cout << "Using remote buffers...\n";
