@@ -45,7 +45,7 @@ SearchByTripletIPU::SearchByTripletIPU(
     this->graph.addCodelets({"src/SearchByTripletCodelet.cpp"}, "-O3 -I src");
 
     // Set the number of threads. For the default batch size of 50, using a single
-    // thread is puts us at the available remote buffer memory limit. If the number
+    // thread puts us at the available remote buffer memory limit. If the number
     // of batches is reduced, then the number of threads can be increased
     // accordingly, i.e. if num_batches = 25, then we can set num_threads = 2.
     // Note that graph compilation will fail with an uninformative segmentation
