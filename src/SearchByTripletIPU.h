@@ -84,7 +84,7 @@ private:
     /// The Poplar program.
     poplar::program::Program program;
 
-	/// The Poplar program sequence.
+    /// The Poplar program sequence.
     std::vector<poplar::program::Program> programs;
 
     /// The number of batches to process.
