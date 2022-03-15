@@ -81,9 +81,7 @@ void SearchByTripletIPU::execute(bool warmup, bool profile)
 
 void SearchByTripletIPU::executeDataStreams(bool warmup, bool profile)
 {
-
-    // Initialise the Poplar engine and load the IPU device.
-
+    // Set options.
     auto optionFlags = poplar::OptionFlags{};
     if (profile)
     {
