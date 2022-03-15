@@ -210,7 +210,6 @@ void SearchByTripletIPU::executeDataStreams(bool warmup, bool profile)
     // Percentage time on compute.
     std::cout << "  Compute time: " << std::setprecision(2) << 100*(compute_secs/total_secs) << " %\n";
 
-    // num_batches-1.
     std::cout << "Validating output...\n";
 
     // Store the number of events.
