@@ -897,7 +897,7 @@ void SearchByTripletIPU::createGraphProgramRemoteBuffers()
         auto phi_rb = this->graph.addRemoteBuffer(
             name, poplar::SHORT, this->num_tiles*phi_size, this->num_batches);
 
-        // Caldidate hits.
+        // Candidate hits.
         name = "candidates_" + std::to_string(ipu_num) + std::to_string(thread_num);
         auto candidates = this->graph.addVariable(
             poplar::UNSIGNED_INT, {this->num_tiles*candidates_size}, name);
