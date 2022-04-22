@@ -453,6 +453,7 @@ void track_forwarding(
         Tracklet *tracklet;
         unsigned number_of_hits;
 
+        // This is a tracklet (three-hit track).
         if (track_flag)
         {
             tracklet = tracklets + track_number;
@@ -461,6 +462,7 @@ void track_forwarding(
             h0 = hits[tracklet->hits[number_of_hits - 2]];
             h1 = hits[tracklet->hits[number_of_hits - 1]];
         }
+        // This is a track.
         else
         {
             track = tracks + track_number;
@@ -470,7 +472,7 @@ void track_forwarding(
             h1 = hits[track->hits[number_of_hits - 1]];
         }
 
-        // Get the z coordinate for h0 within the module pair.
+        // Get the z-coordinate for h0 within the module pair.
         float z;
         if (int(h0.module_idx) % 2 == 0)
         {
