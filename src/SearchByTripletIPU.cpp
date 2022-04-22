@@ -1028,7 +1028,7 @@ void SearchByTripletIPU::createGraphProgramRemoteBuffers()
         copy_from_ipu.add(poplar::program::Copy(num_three_hit_tracks, num_three_hit_tracks_rb, rb_index));
     };
 
-    // Compute program sequences for each stage, i.e. copy to IPU, compute, and
+    // Create program sequences for each stage, i.e. copy to IPU, compute, and
     // copy from IPU.
     poplar::program::Sequence compute;
     poplar::program::Sequence copy_to_ipu;
