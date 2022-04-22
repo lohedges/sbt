@@ -23,31 +23,38 @@
 
 #include "Utils.h"
 
+// Aliases for structs used by algorithm. Poplar rank-1 tensors will be
+// recast to these types for convenience.
+
+// Module pair.
 using ModulePair = struct
 {
-    float hit_start;
-    float num_hits;
-    float z0;
-    float z1;
+    float hit_start;    // Index of initial hit in hit array.
+    float num_hits;     // Number of hits on module pair.
+    float z0;           // The z-coordinate of first module in pair.
+    float z1;           // The z-coordinate of second module in pair.
 };
 
+// Three-hit (candidate) tracks.
 using Tracklet = struct
 {
-    unsigned hits[3];
+    unsigned hits[3];   // Array of hit indices.
 };
 
+// Fully assigned track.
 using Track = struct
 {
-    unsigned num_hits;
-    unsigned hits[constants::max_track_size];
+    unsigned num_hits;  // The number of hits in the track.
+    unsigned hits[constants::max_track_size];   // Array of hit indices.
 };
 
+// A hit.
 using Hit = struct
 {
-    float x;
-    float y;
-    float z;
-    float module_idx;
+    float x;            // The x-coordinate of the hit.
+    float y;            // The y-coordinate of the hit.
+    float z;            // The z-coordinate of the hit.
+    float module_idx;   // The index of the module on which the hit occurs.
 };
 
 using namespace poplar;
