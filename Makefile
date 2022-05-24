@@ -1,9 +1,9 @@
 .DEFAULT_GOAL := all
 
-CXX := g++
+CXX := clang++
 CXXFLAGS := -O3 -Isrc
 
-ABIFLAG := 1
+ABIFLAG := 0
 POPLARFLAGS :=-std=c++17 -L/opt/poplar/lib -lpoplar -lpopops -lpoputil
 
 OMPFLAGS := -fopenmp
