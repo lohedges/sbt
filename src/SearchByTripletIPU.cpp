@@ -42,7 +42,7 @@ SearchByTripletIPU::SearchByTripletIPU(
     this->num_tiles = this->device.getTarget().getTilesPerIPU();
 
     // Add codelets.
-    this->graph.addCodelets({"src/SearchByTripletCodelet.cpp"}, "-O3 -I src");
+    this->graph.addCodelets({"src/SearchByTripletCodelet.cpp"}, "-O3");
 
     // Set the number of threads. For the default batch size of 50, using a single
     // thread puts us at the available remote buffer memory limit. If the number
