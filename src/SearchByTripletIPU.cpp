@@ -142,13 +142,13 @@ void SearchByTripletIPU::executeDataStreams(bool warmup, bool profile)
     double total_secs = 0;
 
     // Record start time.
-    auto start = std::chrono::high_resolution_clock::now();
+    auto start = std::chrono::steady_clock::now();
 
     // Run the host-to-IPU data stream sequence.
     engine.run(Program::COPY_TO_IPU);
 
     // Record end time.
-    auto finish = std::chrono::high_resolution_clock::now();
+    auto finish = std::chrono::steady_clock::now();
     std::chrono::duration<double> elapsed = finish - start;
 
     // Calculate run time per event in seconds.
@@ -161,13 +161,13 @@ void SearchByTripletIPU::executeDataStreams(bool warmup, bool profile)
     std::cout << "Results...\n  Copy to IPU took: " << std::fixed << secs/1000 << " ms\n";
 
     // Reset start time.
-    start = std::chrono::high_resolution_clock::now();
+    start = std::chrono::steady_clock::now();
 
     // Run the main algorithm.
     engine.run(Program::RUN_ALGORITHM);
 
     // Record end time and work out run time.
-    finish = std::chrono::high_resolution_clock::now();
+    finish = std::chrono::steady_clock::now();
     elapsed = finish - start;
 
     // Work out run time in seconds.
@@ -183,13 +183,13 @@ void SearchByTripletIPU::executeDataStreams(bool warmup, bool profile)
     total_secs += secs;
 
     // Reset start time.
-    start = std::chrono::high_resolution_clock::now();
+    start = std::chrono::steady_clock::now();
 
     // Run the IPU-to-host data stream sequence.
     engine.run(Program::COPY_FROM_IPU);
 
     // Record end time and work out run time.
-    finish = std::chrono::high_resolution_clock::now();
+    finish = std::chrono::steady_clock::now();
     elapsed = finish - start;
 
     // Work out run time in seconds.
@@ -347,7 +347,7 @@ void SearchByTripletIPU::executeRemoteBuffers(bool warmup, bool profile)
     double total_secs = 0;
 
     // Record start time.
-    auto start = std::chrono::high_resolution_clock::now();
+    auto start = std::chrono::steady_clock::now();
 
     // Loop over batches.
     #pragma omp parallel for
@@ -376,7 +376,7 @@ void SearchByTripletIPU::executeRemoteBuffers(bool warmup, bool profile)
     }
 
 	// Record end time.
-    auto finish = std::chrono::high_resolution_clock::now();
+    auto finish = std::chrono::steady_clock::now();
     std::chrono::duration<double> elapsed = finish - start;
 
     // Calculate run time per event in seconds.
@@ -389,13 +389,13 @@ void SearchByTripletIPU::executeRemoteBuffers(bool warmup, bool profile)
     std::cout << "Results...\n  Copy to remote buffers took: " << std::fixed << secs/1000 << " ms\n";
 
     // Reset start time.
-    start = std::chrono::high_resolution_clock::now();
+    start = std::chrono::steady_clock::now();
 
     // Run program.
     engine.run(0);
 
     // Record end time.
-    finish = std::chrono::high_resolution_clock::now();
+    finish = std::chrono::steady_clock::now();
     elapsed = finish - start;
 
     // Calculate run time per event in seconds.
@@ -439,7 +439,7 @@ void SearchByTripletIPU::executeRemoteBuffers(bool warmup, bool profile)
     // all data to the host.
 
     // Reset start time.
-    start = std::chrono::high_resolution_clock::now();
+    start = std::chrono::steady_clock::now();
 
     // Loop over batches.
     #pragma omp parallel for
@@ -475,7 +475,7 @@ void SearchByTripletIPU::executeRemoteBuffers(bool warmup, bool profile)
     }
 
     // Record end time.
-    finish = std::chrono::high_resolution_clock::now();
+    finish = std::chrono::steady_clock::now();
     elapsed = finish - start;
 
     // Calculate run time per event in seconds.
