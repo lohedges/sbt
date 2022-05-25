@@ -158,7 +158,7 @@ void SearchByTripletIPU::executeDataStreams(bool warmup, bool profile)
     total_secs += secs;
 
     // Report timing.
-    std::cout << "Results...\n  Copy to IPU took: " << std::fixed << secs/1000 << " ms\n";
+    std::cout << "Results...\n  Copy to IPU took: " << std::fixed << secs*1000 << " ms\n";
 
     // Reset start time.
     start = std::chrono::steady_clock::now();
@@ -175,7 +175,7 @@ void SearchByTripletIPU::executeDataStreams(bool warmup, bool profile)
     const auto compute_secs = secs;
 
     // Report timing.
-    std::cout << "  Algorithm execution took: " << std::fixed << secs/1000 << " ms\n";
+    std::cout << "  Algorithm execution took: " << std::fixed << secs*1000 << " ms\n";
     auto events_per_sec = (this->num_ipus*this->num_tiles*this->num_threads) / secs;
     std::cout << "  Raw events per second: "<< std::fixed << events_per_sec << "\n";
 
@@ -199,7 +199,7 @@ void SearchByTripletIPU::executeDataStreams(bool warmup, bool profile)
     total_secs += secs;
 
     // Report timing.
-    std::cout << "  Copy from IPU took: " << std::fixed << secs/1000 << " ms\n";
+    std::cout << "  Copy from IPU took: " << std::fixed << secs*1000 << " ms\n";
 
     // Overall throughput.
     events_per_sec = (this->num_ipus*this->num_tiles*this->num_threads) / total_secs;
@@ -386,7 +386,7 @@ void SearchByTripletIPU::executeRemoteBuffers(bool warmup, bool profile)
     total_secs += secs;
 
     // Report timing.
-    std::cout << "Results...\n  Copy to remote buffers took: " << std::fixed << secs/1000 << " ms\n";
+    std::cout << "Results...\n  Copy to remote buffers took: " << std::fixed << secs*1000 << " ms\n";
 
     // Reset start time.
     start = std::chrono::steady_clock::now();
@@ -406,7 +406,7 @@ void SearchByTripletIPU::executeRemoteBuffers(bool warmup, bool profile)
     total_secs += secs;
 
     // Report timing.
-    std::cout << "  Algorithm execution took: " << std::fixed << secs/1000 << " ms\n";
+    std::cout << "  Algorithm execution took: " << std::fixed << secs*1000 << " ms\n";
     auto events_per_sec = (this->num_ipus*this->num_threads*this->num_tiles*this->num_batches) / secs;
     std::cout << "  Raw events per second: "<< std::fixed << events_per_sec << "\n";
 
@@ -485,7 +485,7 @@ void SearchByTripletIPU::executeRemoteBuffers(bool warmup, bool profile)
     total_secs += secs;
 
     // Report timing.
-    std::cout << "  Copy from remote buffers took: " << std::fixed << secs/1000 << " ms\n";
+    std::cout << "  Copy from remote buffers took: " << std::fixed << secs*1000 << " ms\n";
 
     // Overall throughput.
     events_per_sec = (this->num_ipus*this->num_threads*this->num_tiles*this->num_batches) / total_secs;
