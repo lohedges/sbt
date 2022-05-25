@@ -142,17 +142,17 @@ Using data streams...
 Compiling graph program...
 Loading program on device...
 Results...
-  Copy to IPU took: 0.001840 ms
-  Algorithm execution took: 0.000029 ms
-  Raw events per second: 603031.029777
-  Copy from IPU took: 0.000633 ms
-  Events per second: 7058.866838
-  Compute time: 1.16 %
+  Copy to IPU took: 1852.540719 ms
+  Algorithm execution took: 29.201208 ms
+  Raw events per second: 604906.481951
+  Copy from IPU took: 647.266322 ms
+  Events per second: 6984.556103
+  Compute time: 1.15 %
 Validating output...
 Finished!
 ````
 
-To bencmark using remote buffers:
+To benchmark using remote buffers:
 
 ```
 ./search_by_triplet true
@@ -187,24 +187,24 @@ Compiling graph program...
 Loading program on device...
 Running benchmarks...
 Results...
-  Copy to remote buffers took: 0.004324 ms
-  Algorithm execution took: 0.002572 ms
-  Raw events per second: 114468.239226
-  Copy from remote buffers took: 0.002933 ms
-  Events per second: 29951.974912
-  Compute time: 26.17 %
+  Copy to remote buffers took: 6826.600001 ms
+  Algorithm execution took: 2570.868797 ms
+  Raw events per second: 114513.817408
+  Copy from remote buffers took: 3988.893267 ms
+  Events per second: 21992.532293
+  Compute time: 19.21 %
 Validating output...
 Finished!
 ````
 
 For the above run, when using data streams, the 4 MK2 IPUs can process events at
-a throughput of around 603000 events per second, i.e. 603kHz. (Note that this
+a throughput of around 605000 events per second, i.e. 605kHz. (Note that this
 timing does not account for data transfer from the host to IPU exchange and back.)
 In contrast, the remote buffer approach, which uses a third of the threads per
 tile, has a throughput of around 115kHz. When including the cost of data transfer
 to and from the host, the throughput falls to around 7kHz when using data streams,
-and around 30kHz when using remote buffers. Processing roughly 17 times the
-number of events gives a gain of only 4x throughput, implying that the time taken
+and around 22kHz when using remote buffers. Processing roughly 17 times the
+number of events gives a gain of only 3x throughput, implying that the time taken
 for compute is still too short relative to the data transfer time.
 
 In contrast, the CPU implementation of the Search by Triplet algorithm within
