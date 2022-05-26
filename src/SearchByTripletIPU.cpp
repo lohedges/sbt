@@ -24,6 +24,8 @@
 
 #include <popops/ElementWise.hpp>
 
+#include <poputil/TileMapping.hpp>
+
 #include "EventReader.h"
 #include "SearchByTripletIPU.h"
 
@@ -621,6 +623,20 @@ void SearchByTripletIPU::createGraphProgramDataStreams()
     // Create a compute set.
     poplar::ComputeSet computeSet = this->graph.addComputeSet("computeSet");
 
+    // Map tensors to the tiles, splitting their elements evenly across
+    // the tiles.
+    poputil::mapTensorLinearly(this->graph, module_pairs);
+    poputil::mapTensorLinearly(this->graph, hits);
+    poputil::mapTensorLinearly(this->graph, phi);
+    poputil::mapTensorLinearly(this->graph, candidates);
+    poputil::mapTensorLinearly(this->graph, used_hits);
+    poputil::mapTensorLinearly(this->graph, tracklets);
+    poputil::mapTensorLinearly(this->graph, tracks);
+    poputil::mapTensorLinearly(this->graph, three_hit_tracks);
+    poputil::mapTensorLinearly(this->graph, num_tracks);
+    poputil::mapTensorLinearly(this->graph, num_three_hit_tracks);
+    poputil::mapTensorLinearly(this->graph, track_mask);
+
     // Loop over the tiles, processing one event per thread.
     for (int i=0; i<total_threads; ++i)
     {
@@ -641,7 +657,6 @@ void SearchByTripletIPU::createGraphProgramDataStreams()
             module_pair_buffer[offset + 4*idx + 3] = module_pair.z1;
             idx++;
         }
-        this->graph.setTileMapping(module_pairs.slice(i*module_pair_size, (i+1)*module_pair_size), tile);
 
         offset = i*hits_size;
         idx = 0;
@@ -662,15 +677,6 @@ void SearchByTripletIPU::createGraphProgramDataStreams()
             phi_buffer[offset + idx] = hit.phi;
             idx++;
         }
-        this->graph.setTileMapping(phi.slice(i*phi_size, (i+1)*phi_size), tile);
-        this->graph.setTileMapping(candidates.slice(i*candidates_size, (i+1)*candidates_size), tile);
-        this->graph.setTileMapping(used_hits.slice(i*phi_size, (i+1)*phi_size), tile);
-        this->graph.setTileMapping(tracklets.slice(i*tracklets_size, (i+1)*tracklets_size), tile);
-        this->graph.setTileMapping(tracks.slice(i*tracks_size, (i+1)*tracks_size), tile);
-        this->graph.setTileMapping(three_hit_tracks.slice(i*three_hit_tracks_size, (i+1)*three_hit_tracks_size), tile);
-        this->graph.setTileMapping(num_tracks.slice(i, i+1), tile);
-        this->graph.setTileMapping(num_three_hit_tracks.slice(i, i+1), tile);
-        this->graph.setTileMapping(track_mask.slice(i*track_mask_size, (i+1)*track_mask_size), tile);
 
         // Add a vertex to the compute set.
         poplar::VertexRef vtx = this->graph.addVertex(computeSet, "SearchByTriplet");
