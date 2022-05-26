@@ -713,7 +713,6 @@ void SearchByTripletIPU::createGraphProgramDataStreams()
 
         // Map the vertex to a tile.
         this->graph.setTileMapping(vtx, tile);
-
     }
 
     // FIFO options. Allowing splitting of streams.
@@ -838,7 +837,6 @@ void SearchByTripletIPU::createGraphProgramRemoteBuffers()
     // Taken from UoB-HPC IPU cookbook:
     // https://github.com/UoB-HPC/ipu-hpc-cookbook
     // This is required to ensure that tensors only exist on a single IPU,
-    // which is not the case when using Poplar's mapLinearlyWithOffset.
     const auto mapLinearlyOnOneIpu = [&](
         poplar::Tensor &tensor,
         const int ipuNum,
