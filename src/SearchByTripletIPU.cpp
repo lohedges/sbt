@@ -16,6 +16,7 @@
 */
 
 #include <chrono>
+#include <cmath>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -552,7 +553,7 @@ void SearchByTripletIPU::createGraphProgramDataStreams()
     // Store the number of module pairs. (Assume this is the same for all events.)
     const auto num_module_pairs = this->events[0].getModulePairs().size();
 
-    // Size of buffer entries. (per tile)
+    // Size of buffer entries. (per thread)
     const auto module_pair_size = 4 * constants::num_module_pairs;
     const auto hits_size = 4 * constants::max_hits;
     const auto phi_size =  constants::max_hits;
@@ -627,7 +628,7 @@ void SearchByTripletIPU::createGraphProgramDataStreams()
         const auto event_idx = i%num_events;
 
         // Work out the tile index.
-        const auto tile = int(i/this->num_threads);
+        const auto tile = std::floor(i/this->num_threads);
 
         // Populate buffers and slice across threads.
         auto offset = i*module_pair_size;
@@ -811,7 +812,7 @@ void SearchByTripletIPU::createGraphProgramRemoteBuffers()
     // Store the number of module pairs. (Assume this is the same for all events.)
     const auto num_module_pairs = this->events[0].getModulePairs().size();
 
-    // Size of buffer entries. (per tile)
+    // Size of buffer entries. (per tile, i.e. one-thread per tile.)
     const auto module_pair_size = 4*constants::num_module_pairs;
     const auto hits_size = 4*constants::max_hits;
     const auto phi_size = constants::max_hits;
