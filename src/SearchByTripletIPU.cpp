@@ -849,6 +849,8 @@ void SearchByTripletIPU::createGraphProgramRemoteBuffers()
         poplar::Device &device,
         poplar::Graph &graph)
     {
+        // Note that we are mapping rank-1 tensors only. The following code
+        // will need to be adapted in the case of multi-dimensional tensors.
         auto totalElements = 1;
         for (auto dim: tensor.shape())
         {
