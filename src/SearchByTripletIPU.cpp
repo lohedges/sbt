@@ -346,7 +346,7 @@ void SearchByTripletIPU::executeRemoteBuffers(bool warmup, bool profile)
 
     std::cout << "Running benchmarks...\n";
 
-	// Initialise the total run time in seconds.
+    // Initialise the total run time in seconds.
     double total_secs = 0;
 
     // Record start time.
@@ -378,7 +378,7 @@ void SearchByTripletIPU::executeRemoteBuffers(bool warmup, bool profile)
         }
     }
 
-	// Record end time.
+    // Record end time.
     auto finish = std::chrono::steady_clock::now();
     std::chrono::duration<double> elapsed = finish - start;
 
